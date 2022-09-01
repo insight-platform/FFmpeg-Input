@@ -1,6 +1,9 @@
 # FFmpeg-Input
 
-FFmpeg Source Accessor Library
+FFmpeg Source Accessor Library is a small library that makes it possible to receive the frames from
+ffmpeg into python program. You can pass to ffmpeg required arguments and url and get the frames like
+opencv does. The library provides the direct access to the ffmpeg library without the launching of 
+the ffmpeg binary. The frames are in raw binary format and must be processed separately.
 
 ## Build In System
 
