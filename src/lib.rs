@@ -88,13 +88,16 @@ pub struct FFMpegSource {
 
 impl Drop for FFMpegSource {
     fn drop(&mut self) {
-        let mut exit_signal = self
-            .exit_signal
-            .lock()
-            .expect("Exit mutex must be always locked without problems");
-        *exit_signal = true;
+        {
+            let mut exit_signal = self
+                .exit_signal
+                .lock()
+                .expect("Exit mutex must be always locked without problems");
+            *exit_signal = true;
+        }
         let t = self.thread.take();
         t.unwrap().join().expect("Thread must be finished normally");
+        debug!("Worker thread is terminated");
     }
 }
 
@@ -221,6 +224,7 @@ fn handle(
 impl FFMpegSource {
     #[new]
     pub fn new(uri: String, params: HashMap<String, String>) -> Self {
+        let _r = env_logger::try_init();
         let (tx, video_source) = crossbeam::channel::bounded(1);
         let exit_signal = Arc::new(Mutex::new(false));
         let thread_exit_signal = exit_signal.clone();
