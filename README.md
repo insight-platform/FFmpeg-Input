@@ -17,3 +17,10 @@ docker run --rm -it -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
 pip3 install --force-reinstall distfiles/dist/*.whl
 ```
 
+### Try It
+
+```
+python3 test.py
+# or
+RUST_LOG=debug python3 test.py
+```
