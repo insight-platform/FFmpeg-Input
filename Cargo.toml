@@ -1,0 +1,31 @@
+[package]
+name = "ffmpeg_input"
+authors = ["Ivan Kudriavtsev <ivan.a.kudryavtsev@gmail.com>"]
+description = "FFMpeg Source Accessor Library"
+homepage = "https://github.com/insight-platform/FFmpeg-Input"
+repository = "https://github.com/insight-platform/FFmpeg-Input"
+readme = "README.md"
+keywords = ["FFmpeg", "Video"]
+categories = ["computer-vision"]
+version = "0.1.1"
+edition = "2021"
+license="Apache-2.0"
+rust-version = "1.62"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+crossbeam = "0.8"
+log = "0.4"
+env_logger = "0.9"
+
+[dependencies.ffmpeg-next]
+version = "5.1"
+
+[dependencies.pyo3]
+version = "0.17"
+features = ["extension-module"]
+
+[profile.release]
+opt-level = 3
