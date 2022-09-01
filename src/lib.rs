@@ -11,28 +11,25 @@ use std::sync::{Arc, Mutex};
 use std::thread::{spawn, JoinHandle};
 
 fn is_stream_key_framed(id: ffmpeg::codec::Id) -> Result<bool, String> {
-    let mut keyframed = Some(true);
-
-    match id {
-        Id::H264 => {}
-        Id::H265 => {}
-        Id::HEVC => {}
-        Id::VP9 => {}
-        Id::AV1 => {}
-        Id::MPEG1VIDEO => {}
-        Id::MPEG2VIDEO => {}
-        Id::MPEG4 => {}
-        Id::MSMPEG4V1 => {}
-        Id::MSMPEG4V2 => {}
-        Id::MSMPEG4V3 => {}
-        Id::THEORA => {}
-        Id::FLV1 => {}
-        Id::MJPEG => keyframed = Some(false),
-        Id::RAWVIDEO => keyframed = Some(false),
-        _ => keyframed = None,
+    let key_frames = match id {
+        Id::H264
+        | Id::H265
+        | Id::HEVC
+        | Id::VP9
+        | Id::AV1
+        | Id::MPEG1VIDEO
+        | Id::MPEG2VIDEO
+        | Id::MPEG4
+        | Id::MSMPEG4V1
+        | Id::MSMPEG4V2
+        | Id::MSMPEG4V3
+        | Id::THEORA
+        | Id::FLV1 => Some(true),
+        Id::MJPEG | Id::RAWVIDEO => Some(false),
+        _ => None,
     };
 
-    match keyframed {
+    match key_frames {
         Some(v) => Ok(v),
         None => Err(format!("{:?}", id)),
     }
