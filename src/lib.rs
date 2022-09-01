@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::{spawn, JoinHandle};
+use std::time::SystemTime;
 
 fn is_stream_key_framed(id: ffmpeg::codec::Id) -> Result<bool, String> {
     let key_frames = match id {
@@ -60,6 +61,10 @@ pub struct VideoFrameEnvelope {
     pub pixel_format: String,
     #[pyo3(get)]
     pub payload: Vec<u8>,
+    #[pyo3(get)]
+    pub system_ts: i64,
+    #[pyo3(get)]
+    pub queue_len: i64,
 }
 
 #[pymethods]
@@ -193,7 +198,7 @@ fn handle(
                          codec, fps, avg_fps, frame_width, frame_height, key_frame, p.data().unwrap().len(),
                          pts, dts, corrupted, pixel_format);
 
-            if tx.is_empty() {
+            if !tx.is_full() {
                 let res = tx.send(VideoFrameEnvelope {
                     codec,
                     frame_width: i64::from(frame_width),
@@ -206,6 +211,14 @@ fn handle(
                     avg_fps,
                     pixel_format,
                     payload: p.data().unwrap().to_vec(),
+                    system_ts: i64::try_from(
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis(),
+                    )
+                    .unwrap(),
+                    queue_len: i64::try_from(tx.len()).unwrap(),
                 });
 
                 if let Err(e) = res {
@@ -220,9 +233,12 @@ fn handle(
 #[pymethods]
 impl FFMpegSource {
     #[new]
-    pub fn new(uri: String, params: HashMap<String, String>) -> Self {
+    pub fn new(uri: String, params: HashMap<String, String>, len: i64) -> Self {
+        assert!(len > 0, "Queue length must be a positive number");
         let _r = env_logger::try_init();
-        let (tx, video_source) = crossbeam::channel::bounded(1);
+        let (tx, video_source) = crossbeam::channel::bounded(
+            usize::try_from(len).expect("Unable to get queue length from the argument"),
+        );
         let exit_signal = Arc::new(Mutex::new(false));
         let thread_exit_signal = exit_signal.clone();
         let thread = Some(spawn(move || handle(uri, params, tx, thread_exit_signal)));
