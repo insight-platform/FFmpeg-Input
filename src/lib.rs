@@ -2,7 +2,7 @@ use crossbeam::channel::{Receiver, Sender};
 use ffmpeg_next as ffmpeg;
 use ffmpeg_next::codec::Id;
 use ffmpeg_next::format::input_with_dictionary;
-use log::{debug, error};
+use log::{debug, error, warn};
 use pyo3::exceptions::PyBrokenPipeError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -60,11 +60,13 @@ pub struct VideoFrameEnvelope {
     #[pyo3(get)]
     pub pixel_format: String,
     #[pyo3(get)]
-    pub payload: Vec<u8>,
-    #[pyo3(get)]
     pub system_ts: i64,
     #[pyo3(get)]
     pub queue_len: i64,
+    #[pyo3(get)]
+    pub queue_full_skipped_count: i64,
+    #[pyo3(get)]
+    pub payload: Vec<u8>,
 }
 
 #[pymethods]
@@ -109,6 +111,7 @@ fn handle(
     tx: Sender<VideoFrameEnvelope>,
     signal: Arc<Mutex<bool>>,
 ) {
+    let mut queue_full_skipped_count = 0;
     ffmpeg::init().unwrap();
     let mut opts = ffmpeg::Dictionary::new();
     for kv in &params {
@@ -121,7 +124,7 @@ fn handle(
     let video_input = ictx
         .streams()
         .best(ffmpeg_next::media::Type::Video)
-        .unwrap_or_else(|| panic!("Cannot detect the best suitable video stream to work with."));
+        .unwrap_or_else(|| panic!("Cannot discover the best suitable video stream to work with."));
 
     let video_stream_index = video_input.index();
 
@@ -210,6 +213,7 @@ fn handle(
                     fps,
                     avg_fps,
                     pixel_format,
+                    queue_full_skipped_count,
                     payload: p.data().unwrap().to_vec(),
                     system_ts: i64::try_from(
                         SystemTime::now()
@@ -225,6 +229,9 @@ fn handle(
                     error!("Unable to send data to upstream. Error is: {:?}", e);
                     break;
                 }
+            } else {
+                warn!("Sink queue is full, the frame is skipped.");
+                queue_full_skipped_count += 1;
             }
         }
     }
