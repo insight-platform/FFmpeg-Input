@@ -1,7 +1,9 @@
 use crossbeam::channel::{Receiver, Sender};
+use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
 use ffmpeg_next::codec::Id;
-use ffmpeg_next::format::input_with_dictionary;
+use ffmpeg_next::format::{input_with_dictionary, Pixel};
+use ffmpeg_next::software::scaling::{Context, Flags};
 use log::{debug, error, warn};
 use pyo3::exceptions::PyBrokenPipeError;
 use pyo3::prelude::*;
@@ -110,16 +112,17 @@ fn handle(
     params: HashMap<String, String>,
     tx: Sender<VideoFrameEnvelope>,
     signal: Arc<Mutex<bool>>,
+    decode: bool,
 ) {
     let mut queue_full_skipped_count = 0;
-    ffmpeg::init().unwrap();
+    ffmpeg::init().expect("FFmpeg initialization must be successful");
     let mut opts = ffmpeg::Dictionary::new();
     for kv in &params {
         opts.set(kv.0.as_str(), kv.1.as_str());
     }
     let p = Path::new(uri.as_str());
 
-    let mut ictx = input_with_dictionary(&p, opts).unwrap();
+    let mut ictx = input_with_dictionary(&p, opts).expect("Input stream must be initialized");
 
     let video_input = ictx
         .streams()
@@ -128,9 +131,21 @@ fn handle(
 
     let video_stream_index = video_input.index();
 
-    let video_decoder = ffmpeg::codec::context::Context::from_parameters(video_input.parameters())
-        .and_then(|c| c.decoder().video())
-        .unwrap();
+    let mut video_decoder =
+        ffmpeg::codec::context::Context::from_parameters(video_input.parameters())
+            .and_then(|c| c.decoder().video())
+            .expect("Video decoder must be available");
+
+    let mut video_scaler = Context::get(
+        video_decoder.format(),
+        video_decoder.width(),
+        video_decoder.height(),
+        Pixel::RGB24,
+        video_decoder.width(),
+        video_decoder.height(),
+        Flags::BILINEAR,
+    )
+    .expect("Video scaler must be initialized");
 
     let audio_stream_index_opt = ictx
         .streams()
@@ -145,7 +160,7 @@ fn handle(
 
     let mut skip_until_first_key_frame = true;
     for (stream, packet) in ictx.packets() {
-        if *signal.lock().unwrap() {
+        if *signal.lock().expect("Mutex is poisoned. Critical error.") {
             break;
         }
 
@@ -185,53 +200,73 @@ fn handle(
                 continue;
             }
 
-            let codec = String::from(video_decoder.codec().unwrap().name());
-            let frame_width = video_decoder.width();
-            let frame_height = video_decoder.height();
-            let pixel_format = format!("{:?}", video_decoder.format());
+            let data = if decode {
+                let mut vecs = Vec::new();
+                video_decoder
+                    .send_packet(p)
+                    .expect("Packet must be sent to decoder");
+                let mut decoded = Video::empty();
+                while video_decoder.receive_frame(&mut decoded).is_ok() {
+                    let mut rgb_frame = Video::empty();
+                    video_scaler
+                        .run(&decoded, &mut rgb_frame)
+                        .expect("RGB conversion must succeed");
+                    vecs.push(rgb_frame.data(0).to_vec());
+                }
+                vecs
+            } else {
+                vec![p.data().unwrap().to_vec()]
+            };
 
-            let key_frame = p.is_key();
-            let pts = p.pts();
-            let dts = p.dts();
-            let corrupted = p.is_corrupt();
-            let fps = stream.rate().to_string();
-            let avg_fps = stream.avg_frame_rate().to_string();
+            for v in data {
+                let codec = String::from(video_decoder.codec().unwrap().name());
+                let frame_width = video_decoder.width();
+                let frame_height = video_decoder.height();
+                let pixel_format = format!("{:?}", video_decoder.format());
 
-            debug!("Frame info: codec_name={:?}, FPS={:?}, AVG_FPS={:?}, width={}, height={}, is_key={}, len={}, pts={:?}, dts={:?}, is_corrupt={}, pixel_format={}",
+                let key_frame = p.is_key();
+                let pts = p.pts();
+                let dts = p.dts();
+                let corrupted = p.is_corrupt();
+                let fps = stream.rate().to_string();
+                let avg_fps = stream.avg_frame_rate().to_string();
+
+                debug!("Frame info: codec_name={:?}, FPS={:?}, AVG_FPS={:?}, width={}, height={}, is_key={}, len={}, pts={:?}, dts={:?}, is_corrupt={}, pixel_format={}",
                          codec, fps, avg_fps, frame_width, frame_height, key_frame, p.data().unwrap().len(),
                          pts, dts, corrupted, pixel_format);
 
-            if !tx.is_full() {
-                let res = tx.send(VideoFrameEnvelope {
-                    codec,
-                    frame_width: i64::from(frame_width),
-                    frame_height: i64::from(frame_height),
-                    key_frame,
-                    pts,
-                    dts,
-                    corrupted,
-                    fps,
-                    avg_fps,
-                    pixel_format,
-                    queue_full_skipped_count,
-                    payload: p.data().unwrap().to_vec(),
-                    system_ts: i64::try_from(
-                        SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis(),
-                    )
-                    .unwrap(),
-                    queue_len: i64::try_from(tx.len()).unwrap(),
-                });
+                if !tx.is_full() {
+                    let res = tx.send(VideoFrameEnvelope {
+                        codec,
+                        frame_width: i64::from(frame_width),
+                        frame_height: i64::from(frame_height),
+                        key_frame,
+                        pts,
+                        dts,
+                        corrupted,
+                        fps,
+                        avg_fps,
+                        pixel_format,
+                        queue_full_skipped_count,
+                        payload: v,
+                        system_ts: i64::try_from(
+                            SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis(),
+                        )
+                        .unwrap(),
+                        queue_len: i64::try_from(tx.len()).unwrap(),
+                    });
 
-                if let Err(e) = res {
-                    error!("Unable to send data to upstream. Error is: {:?}", e);
-                    break;
+                    if let Err(e) = res {
+                        error!("Unable to send data to upstream. Error is: {:?}", e);
+                        break;
+                    }
+                } else {
+                    warn!("Sink queue is full, the frame is skipped.");
+                    queue_full_skipped_count += 1;
                 }
-            } else {
-                warn!("Sink queue is full, the frame is skipped.");
-                queue_full_skipped_count += 1;
             }
         }
     }
@@ -240,7 +275,7 @@ fn handle(
 #[pymethods]
 impl FFMpegSource {
     #[new]
-    pub fn new(uri: String, params: HashMap<String, String>, len: i64) -> Self {
+    pub fn new(uri: String, params: HashMap<String, String>, len: i64, decode: bool) -> Self {
         assert!(len > 0, "Queue length must be a positive number");
         let _r = env_logger::try_init();
         let (tx, video_source) = crossbeam::channel::bounded(
@@ -248,7 +283,9 @@ impl FFMpegSource {
         );
         let exit_signal = Arc::new(Mutex::new(false));
         let thread_exit_signal = exit_signal.clone();
-        let thread = Some(spawn(move || handle(uri, params, tx, thread_exit_signal)));
+        let thread = Some(spawn(move || {
+            handle(uri, params, tx, thread_exit_signal, decode)
+        }));
         Self {
             video_source,
             thread,
