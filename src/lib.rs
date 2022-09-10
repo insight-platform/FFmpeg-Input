@@ -7,6 +7,7 @@ use ffmpeg_next::software::scaling::{Context, Flags};
 use log::{debug, error, warn};
 use pyo3::exceptions::PyBrokenPipeError;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -82,6 +83,10 @@ impl VideoFrameEnvelope {
 
     fn __str__(&self) -> String {
         self.__repr__()
+    }
+
+    fn payload_as_bytes(&self, py: Python) -> PyObject {
+        PyBytes::new(py, &self.payload).into()
     }
 }
 
