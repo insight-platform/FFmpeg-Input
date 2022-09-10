@@ -1,8 +1,9 @@
 from ffmpeg_input import FFMpegSource, VideoFrameEnvelope
+import numpy as np
+import cv2
 
 if __name__ == '__main__':
-    s = FFMpegSource("/dev/video0", params={"video_size": "320x240", "c:v": "v4l2m2m"}, len=100, decode=True)
-    # s = FFMpegSource("/home/ivan/video.mp4", {"c:v": "v4l2m2m"}, len=100, decode=True)
+    s = FFMpegSource("/dev/video0", params={"video_size": "320x240", "c:v": "v4l2m2m"}, len=100, decode=False)
     while True:
         try:
             p = s.video_frame()
