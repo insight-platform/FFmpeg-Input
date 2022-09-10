@@ -140,7 +140,7 @@ fn handle(
         video_decoder.format(),
         video_decoder.width(),
         video_decoder.height(),
-        Pixel::RGB24,
+        Pixel::BGR24,
         video_decoder.width(),
         video_decoder.height(),
         Flags::BILINEAR,
@@ -200,8 +200,8 @@ fn handle(
                 continue;
             }
 
-            let data = if decode {
-                let mut vecs = Vec::new();
+            let raw_frames = if decode {
+                let mut raw_frames = Vec::new();
                 video_decoder
                     .send_packet(p)
                     .expect("Packet must be sent to decoder");
@@ -211,14 +211,14 @@ fn handle(
                     video_scaler
                         .run(&decoded, &mut rgb_frame)
                         .expect("RGB conversion must succeed");
-                    vecs.push(rgb_frame.data(0).to_vec());
+                    raw_frames.push(rgb_frame.data(0).to_vec());
                 }
-                vecs
+                raw_frames
             } else {
                 vec![p.data().unwrap().to_vec()]
             };
 
-            for v in data {
+            for raw_frame in raw_frames {
                 let codec = String::from(video_decoder.codec().unwrap().name());
                 let frame_width = video_decoder.width();
                 let frame_height = video_decoder.height();
@@ -232,7 +232,7 @@ fn handle(
                 let avg_fps = stream.avg_frame_rate().to_string();
 
                 debug!("Frame info: codec_name={:?}, FPS={:?}, AVG_FPS={:?}, width={}, height={}, is_key={}, len={}, pts={:?}, dts={:?}, is_corrupt={}, pixel_format={}",
-                         codec, fps, avg_fps, frame_width, frame_height, key_frame, p.data().unwrap().len(),
+                         codec, fps, avg_fps, frame_width, frame_height, key_frame, raw_frame.len(),
                          pts, dts, corrupted, pixel_format);
 
                 if !tx.is_full() {
@@ -248,7 +248,7 @@ fn handle(
                         avg_fps,
                         pixel_format,
                         queue_full_skipped_count,
-                        payload: v,
+                        payload: raw_frame,
                         system_ts: i64::try_from(
                             SystemTime::now()
                                 .duration_since(SystemTime::UNIX_EPOCH)
