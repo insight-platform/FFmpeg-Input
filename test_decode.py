@@ -18,7 +18,7 @@ if __name__ == '__main__':
             res = np.reshape(res, (p.frame_height, p.frame_width, 3))
             res = cv2.rotate(res[y - h:y + h, x:x + w], cv2.ROTATE_90_COUNTERCLOCKWISE)
             end = time.time()
-            print(p.queue_len, end * 1000 - p.system_ts)
+            print(p.queue_len, end * 1000 - p.frame_received_ts, end * 1000 - p.frame_processed_ts)
             # cv2.imshow('Image', res)
             #if cv2.waitKey(1) & 0xFF == ord('q'):
             #    break

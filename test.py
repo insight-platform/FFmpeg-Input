@@ -7,10 +7,10 @@ if __name__ == '__main__':
     while True:
         try:
             p = s.video_frame()
-            print("Codec: {}, Geometry: {}x{}".format(p.codec, p.frame_width,p.frame_height))
-            print("System ts, when the frame was received from the source:", p.system_ts)
+            print("Codec: {}, Geometry: {}x{}".format(p.codec, p.frame_width, p.frame_height))
+            print("System ts, when the frame was received from the source:", p.frame_received_ts)
             print("Current queue length:", p.queue_len)
-            print("Skipped frames because of queue overflow:",p.queue_full_skipped_count)
+            print("Skipped frames because of queue overflow:", p.queue_full_skipped_count)
             print("Payload length:", len(p.payload))
         except BrokenPipeError:
             print("EOS")

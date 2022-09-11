@@ -63,7 +63,9 @@ pub struct VideoFrameEnvelope {
     #[pyo3(get)]
     pub pixel_format: String,
     #[pyo3(get)]
-    pub system_ts: i64,
+    pub frame_received_ts: i64,
+    #[pyo3(get)]
+    pub frame_processed_ts: i64,
     #[pyo3(get)]
     pub queue_len: i64,
     #[pyo3(get)]
@@ -169,6 +171,14 @@ fn handle(
             break;
         }
 
+        let frame_received_ts = i64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .expect("Milliseconds must fit i64");
+
         if let Some(index) = audio_stream_index_opt {
             if index == stream.index() {
                 if let Some(name) = audio_opt
@@ -241,6 +251,14 @@ fn handle(
                          pts, dts, corrupted, pixel_format);
 
                 if !tx.is_full() {
+                    let frame_processed_ts = i64::try_from(
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis(),
+                    )
+                    .expect("Milliseconds must fit i64");
+
                     let res = tx.send(VideoFrameEnvelope {
                         codec,
                         frame_width: i64::from(frame_width),
@@ -254,13 +272,8 @@ fn handle(
                         pixel_format,
                         queue_full_skipped_count,
                         payload: raw_frame,
-                        system_ts: i64::try_from(
-                            SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap()
-                                .as_millis(),
-                        )
-                        .unwrap(),
+                        frame_received_ts,
+                        frame_processed_ts,
                         queue_len: i64::try_from(tx.len()).unwrap(),
                     });
 
