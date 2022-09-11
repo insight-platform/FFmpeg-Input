@@ -3,7 +3,7 @@ use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
 use ffmpeg_next::codec::Id;
 use ffmpeg_next::format::{input_with_dictionary, Pixel};
-use ffmpeg_next::software::scaling::{Context, Flags};
+use ffmpeg_next::software::converter;
 use log::{debug, error, warn};
 use pyo3::exceptions::PyBrokenPipeError;
 use pyo3::prelude::*;
@@ -143,16 +143,23 @@ fn handle(
             .and_then(|c| c.decoder().video())
             .expect("Video decoder must be available");
 
-    let mut video_scaler = Context::get(
+    let mut converter = converter(
+        (video_decoder.width(), video_decoder.height()),
         video_decoder.format(),
-        video_decoder.width(),
-        video_decoder.height(),
         Pixel::BGR24,
-        video_decoder.width(),
-        video_decoder.height(),
-        Flags::BILINEAR,
     )
     .expect("Video scaler must be initialized");
+
+    // let mut video_scaler = Context::get(
+    //     video_decoder.format(),
+    //     video_decoder.width(),
+    //     video_decoder.height(),
+    //     Pixel::BGR24,
+    //     video_decoder.width(),
+    //     video_decoder.height(),
+    //     Flags::FAST_BILINEAR,
+    // )
+    // .expect("Video scaler must be initialized");
 
     let audio_stream_index_opt = ictx
         .streams()
@@ -223,20 +230,27 @@ fn handle(
                 let mut decoded = Video::empty();
                 while video_decoder.receive_frame(&mut decoded).is_ok() {
                     let mut rgb_frame = Video::empty();
-                    video_scaler
+                    converter
                         .run(&decoded, &mut rgb_frame)
                         .expect("RGB conversion must succeed");
-                    raw_frames.push(rgb_frame.data(0).to_vec());
+
+                    raw_frames.push((
+                        rgb_frame.data(0).to_vec(),
+                        rgb_frame.stride(0) as u32 / 3,
+                        rgb_frame.plane_height(0) as u32,
+                    ));
                 }
                 raw_frames
             } else {
-                vec![p.data().unwrap().to_vec()]
+                vec![(
+                    p.data().unwrap().to_vec(),
+                    video_decoder.width(),
+                    video_decoder.height(),
+                )]
             };
 
-            for raw_frame in raw_frames {
+            for (raw_frame, width, height) in raw_frames {
                 let codec = String::from(video_decoder.codec().unwrap().name());
-                let frame_width = video_decoder.width();
-                let frame_height = video_decoder.height();
                 let pixel_format = format!("{:?}", video_decoder.format());
 
                 let key_frame = p.is_key();
@@ -247,7 +261,7 @@ fn handle(
                 let avg_fps = stream.avg_frame_rate().to_string();
 
                 debug!("Frame info: codec_name={:?}, FPS={:?}, AVG_FPS={:?}, width={}, height={}, is_key={}, len={}, pts={:?}, dts={:?}, is_corrupt={}, pixel_format={}",
-                         codec, fps, avg_fps, frame_width, frame_height, key_frame, raw_frame.len(),
+                         codec, fps, avg_fps, width, height, key_frame, raw_frame.len(),
                          pts, dts, corrupted, pixel_format);
 
                 if !tx.is_full() {
@@ -261,8 +275,8 @@ fn handle(
 
                     let res = tx.send(VideoFrameEnvelope {
                         codec,
-                        frame_width: i64::from(frame_width),
-                        frame_height: i64::from(frame_height),
+                        frame_width: i64::from(width),
+                        frame_height: i64::from(height),
                         key_frame,
                         pts,
                         dts,
