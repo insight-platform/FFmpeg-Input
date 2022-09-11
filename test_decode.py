@@ -9,7 +9,10 @@ h = 200
 w = 600
 
 if __name__ == '__main__':
-    s = FFMpegSource("dump.mp4", {"c:v": "v4l2m2m"}, len=100, decode=True)
+    # s = FFMpegSource("dump.mp4", {"c:v": "v4l2m2m"}, len=100, decode=True)
+    s = FFMpegSource("/dev/video0",
+                     params={"video_size": "1280x720", "c:v": "v4l2m2m", "input_format": "mjpeg"}, len=100, decode=True)
+    s.log_level_panic()
     while True:
         try:
             p = s.video_frame()

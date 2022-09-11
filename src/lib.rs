@@ -3,6 +3,7 @@ use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
 use ffmpeg_next::codec::Id;
 use ffmpeg_next::format::{input_with_dictionary, Pixel};
+use ffmpeg_next::log::Level;
 use ffmpeg_next::software::converter;
 use log::{debug, error, warn};
 use pyo3::exceptions::PyBrokenPipeError;
@@ -97,6 +98,7 @@ pub struct FFMpegSource {
     video_source: Receiver<VideoFrameEnvelope>,
     thread: Option<JoinHandle<()>>,
     exit_signal: Arc<Mutex<bool>>,
+    log_level: Arc<Mutex<Level>>,
 }
 
 impl Drop for FFMpegSource {
@@ -120,6 +122,7 @@ fn handle(
     tx: Sender<VideoFrameEnvelope>,
     signal: Arc<Mutex<bool>>,
     decode: bool,
+    log_level: Arc<Mutex<Level>>,
 ) {
     let mut queue_full_skipped_count = 0;
     ffmpeg::init().expect("FFmpeg initialization must be successful");
@@ -177,6 +180,12 @@ fn handle(
         if *signal.lock().expect("Mutex is poisoned. Critical error.") {
             break;
         }
+
+        ffmpeg::log::set_level(
+            *log_level
+                .lock()
+                .expect("Log level mutex must always be available"),
+        );
 
         let frame_received_ts = i64::try_from(
             SystemTime::now()
@@ -314,14 +323,18 @@ impl FFMpegSource {
             usize::try_from(len).expect("Unable to get queue length from the argument"),
         );
         let exit_signal = Arc::new(Mutex::new(false));
+        let log_level = Arc::new(Mutex::new(Level::Info));
         let thread_exit_signal = exit_signal.clone();
+        let thread_ll = log_level.clone();
         let thread = Some(spawn(move || {
-            handle(uri, params, tx, thread_exit_signal, decode)
+            handle(uri, params, tx, thread_exit_signal, decode, thread_ll)
         }));
+
         Self {
             video_source,
             thread,
             exit_signal,
+            log_level,
         }
     }
 
@@ -331,6 +344,62 @@ impl FFMpegSource {
             Err(e) => Err(PyBrokenPipeError::new_err(format!("{:?}", e))),
             Ok(x) => Ok(x),
         }
+    }
+
+    pub fn log_level_error(&self) {
+        let mut ll = self
+            .log_level
+            .lock()
+            .expect("Log Level mutex must be available");
+        *ll = Level::Error;
+    }
+
+    pub fn log_level_debug(&self) {
+        let mut ll = self
+            .log_level
+            .lock()
+            .expect("Log Level mutex must be available");
+        *ll = Level::Debug;
+    }
+
+    pub fn log_level_warn(&self) {
+        let mut ll = self
+            .log_level
+            .lock()
+            .expect("Log Level mutex must be available");
+        *ll = Level::Warning;
+    }
+
+    pub fn log_level_quiet(&self) {
+        let mut ll = self
+            .log_level
+            .lock()
+            .expect("Log Level mutex must be available");
+        *ll = Level::Quiet;
+    }
+
+    pub fn log_level_fatal(&self) {
+        let mut ll = self
+            .log_level
+            .lock()
+            .expect("Log Level mutex must be available");
+        *ll = Level::Fatal;
+    }
+
+    pub fn log_level_panic(&self) {
+        let mut ll = self
+            .log_level
+            .lock()
+            .expect("Log Level mutex must be available");
+        *ll = Level::Panic;
+    }
+
+    pub fn log_level_trace(&self) {
+        let mut ll = self
+            .log_level
+            .lock()
+            .expect("Log Level mutex must be available");
+        *ll = Level::Trace;
     }
 }
 
