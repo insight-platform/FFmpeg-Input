@@ -9,7 +9,7 @@ h = 200
 w = 600
 
 if __name__ == '__main__':
-    # s = FFMpegSource("dump.mp4", {"c:v": "v4l2m2m"}, len=100, decode=True)
+    # s = FFMpegSource("dump-1296.mp4", {"c:v": "v4l2m2m"}, len=100, decode=True)
     s = FFMpegSource("/dev/video0",
                      params={"video_size": "1280x720", "c:v": "v4l2m2m", "input_format": "mjpeg"}, len=100, decode=True)
     s.log_level_panic()
@@ -26,7 +26,7 @@ if __name__ == '__main__':
             print(p.queue_len, end * 1000 - p.frame_received_ts, end * 1000 - p.frame_processed_ts)
             cv2.imshow('Image', res)
             if cv2.waitKey(1) & 0xFF == ord('q'):
-               break
+                break
         except BrokenPipeError:
             print("EOS")
             break
