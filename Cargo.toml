@@ -30,3 +30,6 @@ features = ["extension-module"]
 
 [profile.release]
 opt-level = 3
+
+[features]
+rpi = ["ffmpeg-next/rpi"]
