@@ -14,10 +14,10 @@ pip3 install --force-reinstall dist/ffmpeg_input-0.1.1-cp38-cp38-linux_x86_64.wh
 
 ### Build In Docker
 
-The base image is Python 3.8. If you have another Python version, change the image accordingly. The versions must match.
+The base image is Python 3.8 / 3.9. If you have another Python version, change the image accordingly. The versions must match.
 
 ```
-docker build -t ffmpeg_input .
+docker build -t ffmpeg_input -f Dockerfile.38 .
 docker run --rm -it -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
 pip3 install --force-reinstall distfiles/dist/*.whl
 ```

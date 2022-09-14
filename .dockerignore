@@ -5,3 +5,4 @@ target
 */Dockerfile
 data
 __pycache__
+Cargo.lock
