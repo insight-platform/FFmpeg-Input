@@ -20,7 +20,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 
 ENV RUSTFLAGS=" -C target-cpu=native -C opt-level=3"
-ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/pulseaudio"
+ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/pulseaudio:/usr/lib/arm-linux-gnueabihf/pulseaudio/"
 
 RUN maturin build --release --out dist
 RUN python3 -m pip install --upgrade pip
