@@ -1,8 +1,8 @@
 dist
 .idea
 target
-**/Dockerfile
-*/Dockerfile
+**/Dockerfile.*
+*/Dockerfile.*
 data
 __pycache__
 Cargo.lock
