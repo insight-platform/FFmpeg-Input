@@ -3,6 +3,7 @@
 set -e
 
 apt-get update && apt-get -y install \
+    patchelf \
     liboping0 \
     liboping-dev \
     clang \
@@ -18,6 +19,7 @@ apt-get update && apt-get -y install \
     libavdevice58 libavdevice-dev \
     libfreetype6-dev \
     libgnutls28-dev \
+    libpulse0 \
     libmp3lame-dev \
     libsdl2-dev \
     libtool \
