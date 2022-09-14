@@ -21,6 +21,6 @@ COPY . .
 
 ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/pulseaudio:/usr/lib/arm-linux-gnueabihf/pulseaudio/"
 
-RUN maturin build --release --out dist
+RUN maturin build --release --manylinux off --out dist
 RUN python3 -m pip install --upgrade pip
 RUN python3 -m pip install dist/*.whl
