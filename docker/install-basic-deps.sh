@@ -51,4 +51,6 @@ rustc -V
 cargo install cargo-chef --locked
 
 /usr/bin/python3 -m pip install --upgrade pip
+/usr/bin/python3 -m pip install --upgrade auditwheel~=5.1
 /usr/bin/python3 -m pip install --upgrade maturin~=0.13
+
