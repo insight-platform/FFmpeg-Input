@@ -13,10 +13,10 @@ apt-get update && apt-get -y install \
     cmake \
     git-core \
     libass-dev \
-    libavutil56 libavutil-dev \
-    libavformat58 libavformat-dev \
-    libavfilter7 libavfilter-dev \
-    libavdevice58 libavdevice-dev \
+    libavutil-dev \
+    libavformat-dev \
+    libavfilter-dev \
+    libavdevice-dev \
     libfreetype6-dev \
     libgnutls28-dev \
     libpulse0 \
