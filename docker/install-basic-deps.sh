@@ -20,6 +20,7 @@ apt-get update && apt-get -y install \
     libfreetype6-dev \
     libgnutls28-dev \
     libpulse0 \
+    curl \
     libmp3lame-dev \
     libsdl2-dev \
     libtool \

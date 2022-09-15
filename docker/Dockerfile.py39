@@ -1,4 +1,4 @@
-FROM python:3.9-bullseye as base
+FROM python:3.9-slim-bullseye as base
 
 WORKDIR /opt
 COPY docker/install-basic-deps.sh .
@@ -22,5 +22,18 @@ COPY . .
 ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/pulseaudio:/usr/lib/arm-linux-gnueabihf/pulseaudio/"
 
 RUN maturin build --release --manylinux off --out dist
+RUN docker/gather-deps.sh
+
+FROM python:3.9-slim-bullseye as target
+
+ENV LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/pulseaudio:/usr/lib/arm-linux-gnueabihf/pulseaudio/"
+
+WORKDIR /
+
+COPY --from=builder /opt/dist /tmp
+COPY --from=builder /opt/deps /
+
 RUN python3 -m pip install --upgrade pip
-RUN python3 -m pip install dist/*.whl
+RUN python3 -m pip install /tmp/*.whl
+RUN rm -R /tmp/*.whl
+

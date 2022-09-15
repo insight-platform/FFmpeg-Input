@@ -1,4 +1,7 @@
 dist
+distfiles
+wheelhouse
+tmp
 .idea
 target
 **/Dockerfile.*
@@ -6,3 +9,4 @@ target
 data
 __pycache__
 Cargo.lock
+*.py
