@@ -7,7 +7,7 @@ repository = "https://github.com/insight-platform/FFmpeg-Input"
 readme = "README.md"
 keywords = ["FFmpeg", "Video"]
 categories = ["computer-vision"]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license="Apache-2.0"
 rust-version = "1.62"
@@ -18,14 +18,15 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 crossbeam = "0.8"
 log = "0.4"
-env_logger = "0.9"
+env_logger = "0.10"
 
 [dependencies.ffmpeg-next]
 git = "https://github.com/insight-platform/rust-ffmpeg.git"
 branch = "master"
+features = ["default"]
 
 [dependencies.pyo3]
-version = "0.17"
+version = "0.19"
 features = ["extension-module"]
 
 [profile.release]
