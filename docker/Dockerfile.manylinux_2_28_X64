@@ -29,5 +29,4 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 ENV LD_LIBRARY_PATH="/usr/lib64/pulseaudio:$LD_LIBRARY_PATH"
 RUN maturin build -f --release --out dist
-RUN docker/gather-deps.sh
 
