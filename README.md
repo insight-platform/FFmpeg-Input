@@ -8,7 +8,7 @@ the ffmpeg binary. The frames are in raw binary format and must be processed sep
 ### Build In Docker (Manylinux_2_28)
 
 ```
-docker build -t ffmpeg_input -f docker/Dockerfile.manylinux_2_28_x86_64 .
+docker build -t ffmpeg_input -f docker/Dockerfile.manylinux_2_28_X64 .
 docker run --rm -it -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
 ```
 
@@ -17,5 +17,5 @@ docker run --rm -it -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
 ```
 python3 test.py
 # or
-RUST_LOG=debug python3 test.py
+python3 test.py
 ```

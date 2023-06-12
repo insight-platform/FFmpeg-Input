@@ -75,6 +75,19 @@ pub struct VideoFrameEnvelope {
     pub payload: Vec<u8>,
 }
 
+#[pyclass]
+#[derive(Debug, Clone)]
+pub enum FFmpegLogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Trace,
+    Quiet,
+    Fatal,
+    Panic,
+}
+
 #[pymethods]
 impl VideoFrameEnvelope {
     #[classattr]
@@ -246,7 +259,7 @@ fn handle(
                     raw_frames.push((
                         rgb_frame.data(0).to_vec(),
                         rgb_frame.stride(0) as u32 / 3,
-                        rgb_frame.plane_height(0) as u32,
+                        rgb_frame.plane_height(0),
                     ));
                 }
                 raw_frames
@@ -313,17 +326,38 @@ fn handle(
     }
 }
 
+fn assign_log_level(ffmpeg_log_level: FFmpegLogLevel) -> Level {
+    match ffmpeg_log_level {
+        FFmpegLogLevel::Error => Level::Error,
+        FFmpegLogLevel::Warn => Level::Warning,
+        FFmpegLogLevel::Info => Level::Info,
+        FFmpegLogLevel::Debug => Level::Debug,
+        FFmpegLogLevel::Trace => Level::Trace,
+        FFmpegLogLevel::Quiet => Level::Quiet,
+        FFmpegLogLevel::Panic => Level::Panic,
+        FFmpegLogLevel::Fatal => Level::Fatal,
+    }
+}
+
 #[pymethods]
 impl FFMpegSource {
     #[new]
-    pub fn new(uri: String, params: HashMap<String, String>, len: i64, decode: bool) -> Self {
-        assert!(len > 0, "Queue length must be a positive number");
-        let _r = env_logger::try_init();
+    #[pyo3(signature = (uri, params, queue_len = 32, decode = false, ffmpeg_log_level = FFmpegLogLevel::Info))]
+    pub fn new(
+        uri: String,
+        params: HashMap<String, String>,
+        queue_len: i64,
+        decode: bool,
+        ffmpeg_log_level: FFmpegLogLevel,
+    ) -> Self {
+        assert!(queue_len > 0, "Queue length must be a positive number");
+
         let (tx, video_source) = crossbeam::channel::bounded(
-            usize::try_from(len).expect("Unable to get queue length from the argument"),
+            usize::try_from(queue_len).expect("Unable to get queue length from the argument"),
         );
         let exit_signal = Arc::new(Mutex::new(false));
-        let log_level = Arc::new(Mutex::new(Level::Info));
+        let log_level = Arc::new(Mutex::new(assign_log_level(ffmpeg_log_level)));
+
         let thread_exit_signal = exit_signal.clone();
         let thread_ll = log_level.clone();
         let thread = Some(spawn(move || {
@@ -346,72 +380,25 @@ impl FFMpegSource {
         }
     }
 
-    pub fn log_level_error(&self) {
+    #[setter]
+    pub fn log_level(&self, ffmpeg_log_level: FFmpegLogLevel) {
         let mut ll = self
             .log_level
             .lock()
             .expect("Log Level mutex must be available");
-        *ll = Level::Error;
-    }
 
-    pub fn log_level_debug(&self) {
-        let mut ll = self
-            .log_level
-            .lock()
-            .expect("Log Level mutex must be available");
-        *ll = Level::Debug;
-    }
-
-    pub fn log_level_warn(&self) {
-        let mut ll = self
-            .log_level
-            .lock()
-            .expect("Log Level mutex must be available");
-        *ll = Level::Warning;
-    }
-
-    pub fn log_level_quiet(&self) {
-        let mut ll = self
-            .log_level
-            .lock()
-            .expect("Log Level mutex must be available");
-        *ll = Level::Quiet;
-    }
-
-    pub fn log_level_fatal(&self) {
-        let mut ll = self
-            .log_level
-            .lock()
-            .expect("Log Level mutex must be available");
-        *ll = Level::Fatal;
-    }
-
-    pub fn log_level_panic(&self) {
-        let mut ll = self
-            .log_level
-            .lock()
-            .expect("Log Level mutex must be available");
-        *ll = Level::Panic;
-    }
-
-    pub fn log_level_trace(&self) {
-        let mut ll = self
-            .log_level
-            .lock()
-            .expect("Log Level mutex must be available");
-        *ll = Level::Trace;
+        *ll = assign_log_level(ffmpeg_log_level);
     }
 }
 
-mod python {
-    use crate::{FFMpegSource, VideoFrameEnvelope};
-    use pyo3::prelude::*;
-
-    #[pymodule]
-    #[pyo3(name = "ffmpeg_input")]
-    fn ffmpeg_input(_py: Python, m: &PyModule) -> PyResult<()> {
-        m.add_class::<VideoFrameEnvelope>()?;
-        m.add_class::<FFMpegSource>()?;
-        Ok(())
-    }
+#[pymodule]
+#[pyo3(name = "ffmpeg_input")]
+fn ffmpeg_input(_py: Python, m: &PyModule) -> PyResult<()> {
+    _ = env_logger::try_init().map_err(|e| {
+        log::warn!("Unable to initialize logger. Error is: {:?}", e);
+    });
+    m.add_class::<VideoFrameEnvelope>()?;
+    m.add_class::<FFMpegSource>()?;
+    m.add_class::<FFmpegLogLevel>()?;
+    Ok(())
 }

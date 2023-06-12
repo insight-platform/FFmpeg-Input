@@ -19,6 +19,7 @@ crate-type = ["cdylib", "lib"]
 crossbeam = "0.8"
 log = "0.4"
 env_logger = "0.10"
+pyo3-log = "0.8"
 
 [dependencies.ffmpeg-next]
 git = "https://github.com/insight-platform/rust-ffmpeg.git"

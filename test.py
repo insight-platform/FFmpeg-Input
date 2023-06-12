@@ -1,9 +1,9 @@
-from ffmpeg_input import FFMpegSource, VideoFrameEnvelope
-import numpy as np
-import cv2
+from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
-    s = FFMpegSource("/dev/video0", params={"video_size": "320x240", "c:v": "v4l2m2m"}, len=100, decode=False)
+    s = FFMpegSource("/dev/video0", params={"video_size": "320x240", "c:v": "v4l2m2m"},
+                     queue_len=100, decode=False,
+                     ffmpeg_log_level=FFmpegLogLevel.Info)
     while True:
         try:
             p = s.video_frame()
