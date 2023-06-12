@@ -24,17 +24,25 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [x86_64, aarch64]
+        include:
+          - docker_file: docker/Dockerfile.manylinux_2_28_ARM64
+            arch: linux/arm64
+          - docker_file: docker/Dockerfile.manylinux_2_28_X86
+            arch: linux/amd64
+
     steps:
       - uses: actions/checkout@v3
-      - name: Display arch
-        run: echo $RUNNER_ARCH
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up docker buildx
+        uses: docker/setup-buildx-action@v2
+
       - name: Build docker image
-        run: docker build -t ffmpeg_input -f docker/Dockerfile.manylinux_2_28_$RUNNER_ARCH .
-      - name: Copy wheels
-        run: docker run --rm -it -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
-      - name: Upload wheels
-        uses: actions/upload-artifact@v3
+        uses: docker/build-push-action@v4
         with:
-          name: wheels
-          path: distfiles/dist
+          file: ${{ matrix.docker_file }}
+          platforms: ${{ matrix.arch }}
+          target: base
+          push: false
