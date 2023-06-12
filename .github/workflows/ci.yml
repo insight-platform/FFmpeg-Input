@@ -44,5 +44,13 @@ jobs:
         with:
           file: ${{ matrix.docker_file }}
           platforms: ${{ matrix.arch }}
-          target: base
+          tags: ffmpeg_input
           push: false
+
+      - name: Copy wheels
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: savant/dist
