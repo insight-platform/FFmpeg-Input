@@ -28,6 +28,7 @@ COPY --from=planner /opt/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 ENV LD_LIBRARY_PATH="/usr/lib64/pulseaudio:$LD_LIBRARY_PATH"
-RUN maturin build -f --release --out dist
+ARG PYTHON_INTERPRETER
+RUN bash /opt/docker/build-manylinux.sh
 RUN rm -rf target
 

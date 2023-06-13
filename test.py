@@ -3,7 +3,8 @@ from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 if __name__ == '__main__':
     s = FFMpegSource("/dev/video0", params={"video_size": "320x240", "c:v": "v4l2m2m"},
                      queue_len=100, decode=False,
-                     ffmpeg_log_level=FFmpegLogLevel.Info)
+                     ffmpeg_log_level=FFmpegLogLevel.Debug)
+    s.log_level = FFmpegLogLevel.Trace
     while True:
         try:
             p = s.video_frame()

@@ -5,7 +5,7 @@ use ffmpeg_next::codec::Id;
 use ffmpeg_next::format::{input_with_dictionary, Pixel};
 use ffmpeg_next::log::Level;
 use ffmpeg_next::software::converter;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use pyo3::exceptions::PyBrokenPipeError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -111,7 +111,7 @@ pub struct FFMpegSource {
     video_source: Receiver<VideoFrameEnvelope>,
     thread: Option<JoinHandle<()>>,
     exit_signal: Arc<Mutex<bool>>,
-    log_level: Arc<Mutex<Level>>,
+    log_level: Arc<Mutex<Option<Level>>>,
 }
 
 impl Drop for FFMpegSource {
@@ -135,10 +135,20 @@ fn handle(
     tx: Sender<VideoFrameEnvelope>,
     signal: Arc<Mutex<bool>>,
     decode: bool,
-    log_level: Arc<Mutex<Level>>,
+    log_level: Arc<Mutex<Option<Level>>>,
 ) {
     let mut queue_full_skipped_count = 0;
     ffmpeg::init().expect("FFmpeg initialization must be successful");
+    let ll = log_level
+        .lock()
+        .expect("Log level mutex must always be available")
+        .take();
+
+    if let Some(l) = ll {
+        info!("Setting log level to {:?}", l);
+        ffmpeg::log::set_level(l);
+    }
+
     let mut opts = ffmpeg::Dictionary::new();
     for kv in &params {
         opts.set(kv.0.as_str(), kv.1.as_str());
@@ -162,7 +172,7 @@ fn handle(
     let mut converter = converter(
         (video_decoder.width(), video_decoder.height()),
         video_decoder.format(),
-        Pixel::BGR24,
+        Pixel::RGBA,
     )
     .expect("Video scaler must be initialized");
 
@@ -193,12 +203,15 @@ fn handle(
         if *signal.lock().expect("Mutex is poisoned. Critical error.") {
             break;
         }
+        let ll = log_level
+            .lock()
+            .expect("Log level mutex must always be available")
+            .take();
 
-        ffmpeg::log::set_level(
-            *log_level
-                .lock()
-                .expect("Log level mutex must always be available"),
-        );
+        if let Some(l) = ll {
+            info!("Setting log level to {:?}", l);
+            ffmpeg::log::set_level(l);
+        }
 
         let frame_received_ts = i64::try_from(
             SystemTime::now()
@@ -356,7 +369,7 @@ impl FFMpegSource {
             usize::try_from(queue_len).expect("Unable to get queue length from the argument"),
         );
         let exit_signal = Arc::new(Mutex::new(false));
-        let log_level = Arc::new(Mutex::new(assign_log_level(ffmpeg_log_level)));
+        let log_level = Arc::new(Mutex::new(Some(assign_log_level(ffmpeg_log_level))));
 
         let thread_exit_signal = exit_signal.clone();
         let thread_ll = log_level.clone();
@@ -387,7 +400,7 @@ impl FFMpegSource {
             .lock()
             .expect("Log Level mutex must be available");
 
-        *ll = assign_log_level(ffmpeg_log_level);
+        *ll = Some(assign_log_level(ffmpeg_log_level));
     }
 }
 
