@@ -31,3 +31,6 @@ ENV LD_LIBRARY_PATH="/usr/lib64/pulseaudio:$LD_LIBRARY_PATH"
 ARG PYTHON_INTERPRETER
 RUN bash /opt/docker/build-manylinux.sh
 RUN rm -rf target
+
+FROM alpine:3.18 as dist
+COPY --from=builder /opt/dist /opt/dist
