@@ -23,7 +23,6 @@ if __name__ == '__main__':
             print(p.frame_height, p.frame_width)
             res = np.frombuffer(res, dtype=np.uint8)
             res = np.reshape(res, (p.frame_height, p.frame_width, 3))
-            res = cv2.rotate(res[y - h:y + h, x:x + w], cv2.ROTATE_90_COUNTERCLOCKWISE)
             end = time.time()
             print(p.queue_len, "all_time={}".format(int(end * 1000 - p.frame_received_ts)),
                   "python_time={}".format(int(end * 1000 - p.frame_processed_ts)))
