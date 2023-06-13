@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{spawn, JoinHandle};
 use std::time::SystemTime;
 
+const DECODING_FORMAT: Pixel = Pixel::BGR24;
+const DECODED_PIX_BYTES: u32 = 3;
+
 fn is_stream_key_framed(id: ffmpeg::codec::Id) -> Result<bool, String> {
     let key_frames = match id {
         Id::H264
@@ -172,7 +175,7 @@ fn handle(
     let mut converter = converter(
         (video_decoder.width(), video_decoder.height()),
         video_decoder.format(),
-        Pixel::RGBA,
+        DECODING_FORMAT,
     )
     .expect("Video scaler must be initialized");
 
@@ -271,7 +274,7 @@ fn handle(
 
                     raw_frames.push((
                         rgb_frame.data(0).to_vec(),
-                        rgb_frame.stride(0) as u32 / 3,
+                        rgb_frame.stride(0) as u32 / DECODED_PIX_BYTES,
                         rgb_frame.plane_height(0),
                     ));
                 }
