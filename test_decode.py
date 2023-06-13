@@ -3,11 +3,6 @@ import numpy as np
 import cv2
 import time
 
-x = 500
-y = 500
-h = 200
-w = 600
-
 if __name__ == '__main__':
     s = FFMpegSource("/dev/video0",
                      params={"video_size": "1280x720", "c:v": "v4l2m2m", "input_format": "mjpeg"},
