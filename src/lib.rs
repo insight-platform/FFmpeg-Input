@@ -389,11 +389,15 @@ impl FFMpegSource {
     }
 
     pub fn video_frame(&self) -> PyResult<VideoFrameEnvelope> {
-        let res = self.video_source.recv();
-        match res {
-            Err(e) => Err(PyBrokenPipeError::new_err(format!("{:?}", e))),
-            Ok(x) => Ok(x),
-        }
+        Python::with_gil(|py| {
+            py.allow_threads(|| {
+                let res = self.video_source.recv();
+                match res {
+                    Err(e) => Err(PyBrokenPipeError::new_err(format!("{:?}", e))),
+                    Ok(x) => Ok(x),
+                }
+            })
+        })
     }
 
     #[setter]
