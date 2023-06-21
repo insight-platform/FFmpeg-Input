@@ -55,6 +55,8 @@ pub struct VideoFrameEnvelope {
     #[pyo3(get)]
     pub key_frame: bool,
     #[pyo3(get)]
+    pub time_base: (i64, i64),
+    #[pyo3(get)]
     pub pts: Option<i64>,
     #[pyo3(get)]
     pub dts: Option<i64>,
@@ -237,6 +239,7 @@ fn handle(
 
         if stream.index() == video_stream_index {
             let p = &packet;
+            let time_base_r = stream.time_base();
 
             let has_key_frames = match is_stream_key_framed(stream.codec().id()) {
                 Ok(res) => res,
@@ -319,6 +322,7 @@ fn handle(
                         pts,
                         dts,
                         corrupted,
+                        time_base: (time_base_r.0 as i64, time_base_r.1 as i64),
                         fps,
                         avg_fps,
                         pixel_format,
