@@ -19,7 +19,7 @@ if __name__ == '__main__':
             res = np.frombuffer(res, dtype=np.uint8)
             res = np.reshape(res, (p.frame_height, p.frame_width, 3))
             end = time.time()
-            print(p.queue_len, "all_time={}".format(int(end * 1000 - p.frame_received_ts)),
+            print(p.codec, p.pixel_format, p.queue_len, "all_time={}".format(int(end * 1000 - p.frame_received_ts)),
                   "python_time={}".format(int(end * 1000 - p.frame_processed_ts)))
             cv2.imshow('Image', res)
             if cv2.waitKey(1) & 0xFF == ord('q'):

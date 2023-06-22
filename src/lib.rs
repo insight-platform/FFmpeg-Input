@@ -18,7 +18,7 @@ use std::time::SystemTime;
 const DECODING_FORMAT: Pixel = Pixel::BGR24;
 const DECODED_PIX_BYTES: u32 = 3;
 
-fn is_stream_key_framed(id: ffmpeg::codec::Id) -> Result<bool, String> {
+fn is_stream_key_framed(id: Id) -> Result<bool, String> {
     let key_frames = match id {
         Id::H264
         | Id::H265
@@ -291,8 +291,17 @@ fn handle(
             };
 
             for (raw_frame, width, height) in raw_frames {
-                let codec = String::from(video_decoder.codec().unwrap().name());
-                let pixel_format = format!("{:?}", video_decoder.format());
+                let codec = if !decode {
+                    String::from(video_decoder.codec().unwrap().name())
+                } else {
+                    String::from(Id::RAWVIDEO.name())
+                };
+
+                let pixel_format = if !decode {
+                    format!("{:?}", video_decoder.format())
+                } else {
+                    format!("{:?}", DECODING_FORMAT)
+                };
 
                 let key_frame = p.is_key();
                 let pts = p.pts();

@@ -15,7 +15,15 @@ pip install ffmpeg-input
 ### Build In Docker (Manylinux_2_28)
 
 ```bash
+# certain python version (decreases build time)
+#
+docker build  -t ffmpeg_input -f docker/Dockerfile.manylinux_2_28_X64 --build-arg PYTHON_INTERPRETER=/opt/python/cp38-cp38/bin/python .
+# all manylinux versions
+#
 docker build -t ffmpeg_input -f docker/Dockerfile.manylinux_2_28_X64 .
+
+# copy wheels from docker
+#
 docker run --rm -it -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
 ```
 
