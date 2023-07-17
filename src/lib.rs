@@ -24,6 +24,7 @@ fn is_stream_key_framed(id: Id) -> Result<bool, String> {
         | Id::H265
         | Id::HEVC
         | Id::VP9
+        | Id::VP8
         | Id::AV1
         | Id::MPEG1VIDEO
         | Id::MPEG2VIDEO
@@ -33,7 +34,7 @@ fn is_stream_key_framed(id: Id) -> Result<bool, String> {
         | Id::MSMPEG4V3
         | Id::THEORA
         | Id::FLV1 => Some(true),
-        Id::MJPEG | Id::PNG | Id::RAWVIDEO => Some(false),
+        Id::MJPEG | Id::TIFF | Id::PNG | Id::JPEG2000 | Id::RAWVIDEO => Some(false),
         _ => None,
     };
 

@@ -1,7 +1,7 @@
 from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
-    s = FFMpegSource("/home/ivan/graph.png", params={},
+    s = FFMpegSource("/home/ivan/sample1.jp2", params={},
                      queue_len=100, decode=False,
                      ffmpeg_log_level=FFmpegLogLevel.Debug)
     s.log_level = FFmpegLogLevel.Trace
