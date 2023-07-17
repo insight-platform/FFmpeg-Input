@@ -1,7 +1,7 @@
 from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
-    s = FFMpegSource("/dev/video0", params={"video_size": "320x240", "c:v": "v4l2m2m"},
+    s = FFMpegSource("/home/ivan/graph.png", params={},
                      queue_len=100, decode=False,
                      ffmpeg_log_level=FFmpegLogLevel.Debug)
     s.log_level = FFmpegLogLevel.Trace

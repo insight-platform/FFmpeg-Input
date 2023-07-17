@@ -33,7 +33,7 @@ fn is_stream_key_framed(id: Id) -> Result<bool, String> {
         | Id::MSMPEG4V3
         | Id::THEORA
         | Id::FLV1 => Some(true),
-        Id::MJPEG | Id::RAWVIDEO => Some(false),
+        Id::MJPEG | Id::PNG | Id::RAWVIDEO => Some(false),
         _ => None,
     };
 
