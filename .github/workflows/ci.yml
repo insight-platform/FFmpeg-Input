@@ -73,7 +73,10 @@ jobs:
     steps:
       - uses: actions/download-artifact@v3
         with:
-          name: wheels
+          name: wheels-manylinux-arm
+      - uses: actions/download-artifact@v3
+        with:
+          name: wheels-manylinux-x86
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
         env:
