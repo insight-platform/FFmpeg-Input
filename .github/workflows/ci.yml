@@ -3,7 +3,7 @@
 #
 #    maturin generate-ci github
 #
-name: Savant CI
+name: FFmpeg-Input CI
 
 on:
   push:
