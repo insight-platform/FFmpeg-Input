@@ -26,12 +26,16 @@ jobs:
       matrix:
         include:
           - docker_file: docker/Dockerfile.manylinux_2_28_ARM64
+            name: manylinux-arm
             arch: linux/arm64
           - docker_file: docker/Dockerfile.manylinux_2_28_X64
+            name: manylinux-x86
             arch: linux/amd64
           - docker_file: docker/Dockerfile.u2004
+            name: native-arm
             arch: linux/arm64
           - docker_file: docker/Dockerfile.u2004
+            name: native-x86
             arch: linux/amd64
 
     steps:
@@ -58,7 +62,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
-          name: wheels
+          name: wheels-${{ matrix.name }}
           path: distfiles/dist
 
   release:
