@@ -1,8 +1,8 @@
 from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
-    s = FFMpegSource("/home/ivan/sample1.jp2", params={},
-                     queue_len=100, decode=False,
+    s = FFMpegSource("/home/ivan/road-traffic-processed.mp4", params={"fflags": "+genpts"},
+                     queue_len=100, decode=True,
                      ffmpeg_log_level=FFmpegLogLevel.Debug)
     s.log_level = FFmpegLogLevel.Trace
     while True:
@@ -14,6 +14,7 @@ if __name__ == '__main__':
             print("Time base, pts, dts:", p.time_base, p.pts, p.dts)
             print("Skipped frames because of queue overflow:", p.queue_full_skipped_count)
             print("Payload length:", len(p.payload_as_bytes()))
+            break
         except BrokenPipeError:
             print("EOS")
             break

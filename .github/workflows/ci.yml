@@ -29,6 +29,10 @@ jobs:
             arch: linux/arm64
           - docker_file: docker/Dockerfile.manylinux_2_28_X64
             arch: linux/amd64
+          - docker_file: docker/Dockerfile.u2004
+            arch: linux/arm64
+          - docker_file: docker/Dockerfile.u2004
+            arch: linux/amd64
 
     steps:
       - uses: actions/checkout@v3
