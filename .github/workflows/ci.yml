@@ -84,3 +84,19 @@ jobs:
         with:
           command: upload
           args: --skip-existing *
+      - name: Download native artifacts ARM
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-native-arm
+      - name: Download native artifacts x86
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels-native-x86
+      - name: Release with Notes
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            wheels-native-arm/*
+            wheels-native-x86/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
