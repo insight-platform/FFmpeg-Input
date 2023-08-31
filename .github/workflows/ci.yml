@@ -92,7 +92,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: wheels-native-x86
-      - name: Release with Notes
+      - name: Attach Artifacts to the release
         uses: softprops/action-gh-release@v1
         with:
           files: |
