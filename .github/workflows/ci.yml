@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -55,6 +55,7 @@ jobs:
           tags: ffmpeg_input
           push: false
           load: true
+          context: .
 
       - name: Copy wheels
         run: docker run --rm -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
@@ -96,7 +97,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            wheels-native-arm/*
-            wheels-native-x86/*
+            *.whl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
