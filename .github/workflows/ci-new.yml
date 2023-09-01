@@ -71,6 +71,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            ffmpeg-input-*
+            *.whl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
