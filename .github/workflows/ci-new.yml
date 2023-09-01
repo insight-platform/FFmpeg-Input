@@ -34,7 +34,6 @@ jobs:
 
       - name: Set up docker buildx
         uses: docker/setup-buildx-action@v2
-
       - name: Build docker image
         uses: docker/build-push-action@v4
         with:
@@ -43,6 +42,9 @@ jobs:
           tags: ffmpeg_input
           push: false
           load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          context: .
 
       - name: Copy wheels
         run: docker run --rm -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
