@@ -63,6 +63,8 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: wheels-native-x86
+      - name: List what is available
+        run: ls -l
       - name: Attach Artifacts to the release
         uses: softprops/action-gh-release@v1
         with:
