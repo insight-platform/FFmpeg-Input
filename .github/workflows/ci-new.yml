@@ -70,6 +70,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            wheels-native-x86
+            ffmpeg-input-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
