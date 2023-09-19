@@ -428,7 +428,7 @@ impl FFMpegSource {
 #[pymodule]
 #[pyo3(name = "ffmpeg_input")]
 fn ffmpeg_input(_py: Python, m: &PyModule) -> PyResult<()> {
-    _ = env_logger::try_init().map_err(|e| {
+    _ = env_logger::try_init_from_env("LOGLEVEL").map_err(|e| {
         log::warn!("Unable to initialize logger. Error is: {:?}", e);
     });
     m.add_class::<VideoFrameEnvelope>()?;
