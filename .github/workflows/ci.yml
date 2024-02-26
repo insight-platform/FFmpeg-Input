@@ -31,7 +31,7 @@ jobs:
           - docker_file: docker/Dockerfile.manylinux_2_28_X64
             name: manylinux-x86
             arch: linux/amd64
-            runner: X86
+            runner: X64
           - docker_file: docker/Dockerfile.u2204
             name: native-arm
             arch: linux/arm64
@@ -39,7 +39,7 @@ jobs:
           - docker_file: docker/Dockerfile.u2204
             name: native-x86
             arch: linux/amd64
-            runner: X86
+            runner: X64
     runs-on:
       - self-hosted
       - ${{ matrix.runner }}
