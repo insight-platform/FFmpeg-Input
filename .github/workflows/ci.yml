@@ -21,23 +21,28 @@ permissions:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - docker_file: docker/Dockerfile.manylinux_2_28_ARM64
             name: manylinux-arm
             arch: linux/arm64
+            runner: ARM64
           - docker_file: docker/Dockerfile.manylinux_2_28_X64
             name: manylinux-x86
             arch: linux/amd64
-          - docker_file: docker/Dockerfile.u2004
+            runner: X86
+          - docker_file: docker/Dockerfile.u2204
             name: native-arm
             arch: linux/arm64
-          - docker_file: docker/Dockerfile.u2004
+            runner: ARM64
+          - docker_file: docker/Dockerfile.u2204
             name: native-x86
             arch: linux/amd64
-
+            runner: X86
+    runs-on:
+      - self-hosted
+      - ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v3
 

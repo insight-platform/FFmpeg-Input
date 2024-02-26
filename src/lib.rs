@@ -6,12 +6,13 @@ use ffmpeg_next::format::{input_with_dictionary, Pixel};
 use ffmpeg_next::log::Level;
 use ffmpeg_next::software::converter;
 use log::{debug, error, info, warn};
+use parking_lot::Mutex;
 use pyo3::exceptions::PyBrokenPipeError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::{spawn, JoinHandle};
 use std::time::SystemTime;
 
@@ -123,10 +124,7 @@ pub struct FFMpegSource {
 impl Drop for FFMpegSource {
     fn drop(&mut self) {
         {
-            let mut exit_signal = self
-                .exit_signal
-                .lock()
-                .expect("Exit mutex must be always locked without problems");
+            let mut exit_signal = self.exit_signal.lock();
             *exit_signal = true;
         }
         let t = self.thread.take();
@@ -145,10 +143,7 @@ fn handle(
 ) {
     let mut queue_full_skipped_count = 0;
     ffmpeg::init().expect("FFmpeg initialization must be successful");
-    let ll = log_level
-        .lock()
-        .expect("Log level mutex must always be available")
-        .take();
+    let ll = log_level.lock().take();
 
     if let Some(l) = ll {
         info!("Setting log level to {:?}", l);
@@ -206,13 +201,10 @@ fn handle(
 
     let mut skip_until_first_key_frame = true;
     for (stream, packet) in ictx.packets() {
-        if *signal.lock().expect("Mutex is poisoned. Critical error.") {
+        if *signal.lock() {
             break;
         }
-        let ll = log_level
-            .lock()
-            .expect("Log level mutex must always be available")
-            .take();
+        let ll = log_level.lock().take();
 
         if let Some(l) = ll {
             info!("Setting log level to {:?}", l);
@@ -416,11 +408,7 @@ impl FFMpegSource {
 
     #[setter]
     pub fn log_level(&self, ffmpeg_log_level: FFmpegLogLevel) {
-        let mut ll = self
-            .log_level
-            .lock()
-            .expect("Log Level mutex must be available");
-
+        let mut ll = self.log_level.lock();
         *ll = Some(assign_log_level(ffmpeg_log_level));
     }
 }
