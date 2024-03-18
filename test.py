@@ -2,7 +2,7 @@ from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
     s = FFMpegSource("/home/ivan/road-traffic-processed.mp4", params={"fflags": "+genpts"},
-                     queue_len=100, decode=True,
+                     queue_len=100, decode=False,
                      ffmpeg_log_level=FFmpegLogLevel.Debug)
     s.log_level = FFmpegLogLevel.Trace
     while True:

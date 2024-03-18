@@ -1,3 +1,9 @@
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
+use std::thread::{spawn, JoinHandle};
+use std::time::SystemTime;
+
 use crossbeam::channel::{Receiver, Sender};
 use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
@@ -10,13 +16,8 @@ use parking_lot::Mutex;
 use pyo3::exceptions::PyBrokenPipeError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
-use std::thread::{spawn, JoinHandle};
-use std::time::SystemTime;
 
-const DECODING_FORMAT: Pixel = Pixel::BGR24;
+const DECODING_FORMAT: Pixel = Pixel::RGB24;
 const DECODED_PIX_BYTES: u32 = 3;
 
 fn is_stream_key_framed(id: Id) -> Result<bool, String> {
@@ -108,8 +109,12 @@ impl VideoFrameEnvelope {
         self.__repr__()
     }
 
-    fn payload_as_bytes(&self, py: Python) -> PyObject {
-        PyBytes::new(py, &self.payload).into()
+    fn payload_as_bytes(&self, py: Python) -> PyResult<PyObject> {
+        let res = PyBytes::new_with(py, self.payload.len(), |b: &mut [u8]| {
+            b.copy_from_slice(&self.payload);
+            Ok(())
+        })?;
+        Ok(res.into())
     }
 }
 
@@ -139,6 +144,7 @@ fn handle(
     tx: Sender<VideoFrameEnvelope>,
     signal: Arc<Mutex<bool>>,
     decode: bool,
+    autoconvert_raw_formats_to_rgb24: bool,
     log_level: Arc<Mutex<Option<Level>>>,
 ) {
     let mut queue_full_skipped_count = 0;
@@ -181,7 +187,7 @@ fn handle(
     //     video_decoder.format(),
     //     video_decoder.width(),
     //     video_decoder.height(),
-    //     Pixel::BGR24,
+    //     Pixel::rgb24,
     //     video_decoder.width(),
     //     video_decoder.height(),
     //     Flags::FAST_BILINEAR,
@@ -255,6 +261,10 @@ fn handle(
             if skip_until_first_key_frame {
                 continue;
             }
+
+            let decode = decode
+                || (autoconvert_raw_formats_to_rgb24
+                    && video_decoder.codec().map(|c| c.id()) == Some(Id::RAWVIDEO));
 
             let raw_frames = if decode {
                 let mut raw_frames = Vec::new();
@@ -364,12 +374,18 @@ fn assign_log_level(ffmpeg_log_level: FFmpegLogLevel) -> Level {
 #[pymethods]
 impl FFMpegSource {
     #[new]
-    #[pyo3(signature = (uri, params, queue_len = 32, decode = false, ffmpeg_log_level = FFmpegLogLevel::Info))]
+    #[pyo3(signature = (uri, params,
+        queue_len = 32,
+        decode = false,
+        autoconvert_raw_formats_to_rgb24 = false,
+        ffmpeg_log_level = FFmpegLogLevel::Info)
+    )]
     pub fn new(
         uri: String,
         params: HashMap<String, String>,
         queue_len: i64,
         decode: bool,
+        autoconvert_raw_formats_to_rgb24: bool,
         ffmpeg_log_level: FFmpegLogLevel,
     ) -> Self {
         assert!(queue_len > 0, "Queue length must be a positive number");
@@ -383,7 +399,15 @@ impl FFMpegSource {
         let thread_exit_signal = exit_signal.clone();
         let thread_ll = log_level.clone();
         let thread = Some(spawn(move || {
-            handle(uri, params, tx, thread_exit_signal, decode, thread_ll)
+            handle(
+                uri,
+                params,
+                tx,
+                thread_exit_signal,
+                decode,
+                autoconvert_raw_formats_to_rgb24,
+                thread_ll,
+            )
         }));
 
         Self {

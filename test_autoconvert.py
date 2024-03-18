@@ -5,9 +5,9 @@ import time
 
 if __name__ == '__main__':
     s = FFMpegSource("/dev/video0",
-                     params={"video_size": "1920x1080", "c:v": "v4l2m2m", "input_format": "mjpeg"},
+                     params={"video_size": "1920x1080", "c:v": "v4l2m2m", "input_format": "yuyv422"},
                      queue_len=100,
-                     decode=True,
+                     autoconvert_raw_formats_to_rgb24=True,
                      ffmpeg_log_level=FFmpegLogLevel.Info)
     s.log_level = FFmpegLogLevel.Panic
     while True:
