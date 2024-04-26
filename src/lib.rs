@@ -138,6 +138,7 @@ impl Drop for FFMpegSource {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle(
     uri: String,
     params: HashMap<String, String>,
@@ -145,6 +146,7 @@ fn handle(
     signal: Arc<Mutex<bool>>,
     decode: bool,
     autoconvert_raw_formats_to_rgb24: bool,
+    block_if_queue_full: bool,
     log_level: Arc<Mutex<Option<Level>>>,
 ) {
     let mut queue_full_skipped_count = 0;
@@ -317,41 +319,48 @@ fn handle(
                          codec, fps, avg_fps, width, height, key_frame, raw_frame.len(),
                          pts, dts, corrupted, pixel_format);
 
-                if !tx.is_full() {
-                    let frame_processed_ts = i64::try_from(
-                        SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis(),
-                    )
-                    .expect("Milliseconds must fit i64");
+                let frame_processed_ts = i64::try_from(
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis(),
+                )
+                .expect("Milliseconds must fit i64");
 
-                    let res = tx.send(VideoFrameEnvelope {
-                        codec,
-                        frame_width: i64::from(width),
-                        frame_height: i64::from(height),
-                        key_frame,
-                        pts,
-                        dts,
-                        corrupted,
-                        time_base: (time_base_r.0 as i64, time_base_r.1 as i64),
-                        fps,
-                        avg_fps,
-                        pixel_format,
-                        queue_full_skipped_count,
-                        payload: raw_frame,
-                        frame_received_ts,
-                        frame_processed_ts,
-                        queue_len: i64::try_from(tx.len()).unwrap(),
-                    });
+                let frame_envelope = VideoFrameEnvelope {
+                    codec,
+                    frame_width: i64::from(width),
+                    frame_height: i64::from(height),
+                    key_frame,
+                    pts,
+                    dts,
+                    corrupted,
+                    time_base: (time_base_r.0 as i64, time_base_r.1 as i64),
+                    fps,
+                    avg_fps,
+                    pixel_format,
+                    queue_full_skipped_count,
+                    payload: raw_frame,
+                    frame_received_ts,
+                    frame_processed_ts,
+                    queue_len: i64::try_from(tx.len()).unwrap(),
+                };
 
-                    if let Err(e) = res {
-                        error!("Unable to send data to upstream. Error is: {:?}", e);
-                        break;
+                if !block_if_queue_full {
+                    if !tx.is_full() {
+                        let res = tx.send(frame_envelope);
+
+                        if let Err(e) = res {
+                            error!("Unable to send data to upstream. Error is: {:?}", e);
+                            break;
+                        }
+                    } else {
+                        dbg!("Sink queue is full, the frame is skipped.");
+                        queue_full_skipped_count += 1;
                     }
                 } else {
-                    warn!("Sink queue is full, the frame is skipped.");
-                    queue_full_skipped_count += 1;
+                    tx.send(frame_envelope)
+                        .expect("Unable to send data to upstream");
                 }
             }
         }
@@ -378,6 +387,7 @@ impl FFMpegSource {
         queue_len = 32,
         decode = false,
         autoconvert_raw_formats_to_rgb24 = false,
+        block_if_queue_full = false,
         ffmpeg_log_level = FFmpegLogLevel::Info)
     )]
     pub fn new(
@@ -386,6 +396,7 @@ impl FFMpegSource {
         queue_len: i64,
         decode: bool,
         autoconvert_raw_formats_to_rgb24: bool,
+        block_if_queue_full: bool,
         ffmpeg_log_level: FFmpegLogLevel,
     ) -> Self {
         assert!(queue_len > 0, "Queue length must be a positive number");
@@ -406,6 +417,7 @@ impl FFMpegSource {
                 thread_exit_signal,
                 decode,
                 autoconvert_raw_formats_to_rgb24,
+                block_if_queue_full,
                 thread_ll,
             )
         }));

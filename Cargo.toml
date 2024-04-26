@@ -7,9 +7,9 @@ repository = "https://github.com/insight-platform/FFmpeg-Input"
 readme = "README.md"
 keywords = ["FFmpeg", "Video"]
 categories = ["computer-vision"]
-version = "0.1.23"
+version = "0.1.24"
 edition = "2021"
-license="Apache-2.0"
+license = "Apache-2.0"
 rust-version = "1.62"
 
 [lib]
@@ -22,7 +22,7 @@ env_logger = "0.11"
 parking_lot = "0.12"
 
 [dependencies.ffmpeg-next]
-version = "6"
+version = "7"
 features = ["default"]
 
 [dependencies.pyo3]
@@ -30,7 +30,7 @@ version = "0.20"
 features = ["extension-module"]
 
 [build-dependencies]
-pyo3-build-config = { version = "0.20"}
+pyo3-build-config = { version = "0.20" }
 
 [profile.release]
 opt-level = 3
