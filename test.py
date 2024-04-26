@@ -1,5 +1,6 @@
-from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 from time import sleep
+
+from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
     s = FFMpegSource("/home/ivan/file.mp4", params={},
