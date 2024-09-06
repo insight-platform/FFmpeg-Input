@@ -1,11 +1,11 @@
 use anyhow::bail;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::{spawn, JoinHandle};
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 use crossbeam::channel::{Receiver, Sender};
+use derive_builder::Builder;
 use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
 use ffmpeg_next::codec::Id;
@@ -14,7 +14,7 @@ use ffmpeg_next::log::Level;
 use ffmpeg_next::software::converter;
 use log::{debug, error, info};
 use parking_lot::Mutex;
-use pyo3::exceptions::{PyBrokenPipeError, PySystemError};
+use pyo3::exceptions::{PyBrokenPipeError, PySystemError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
@@ -145,30 +145,12 @@ impl Drop for FFMpegSource {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle_wrapper(
-    uri: String,
-    params: HashMap<String, String>,
-    tx: Sender<VideoFrameEnvelope>,
-    signal: Arc<Mutex<bool>>,
-    decode: bool,
-    autoconvert_raw_formats_to_rgb24: bool,
-    block_if_queue_full: bool,
-    log_level: Arc<Mutex<Option<Level>>>,
-) -> anyhow::Result<()> {
-    match handle(
-        uri,
-        params,
-        tx,
-        signal.clone(),
-        decode,
-        autoconvert_raw_formats_to_rgb24,
-        block_if_queue_full,
-        log_level,
-    ) {
+fn handle_wrapper(params: HandleParams) -> anyhow::Result<()> {
+    let exit_signal = params.exit_signal.clone();
+    match handle(params) {
         Ok(_) => Ok(()),
         Err(e) => {
-            let mut state = signal.lock();
+            let mut state = exit_signal.lock();
             *state = true;
             error!("Error in the worker thread. Error is: {:?}", e);
             Err(e)
@@ -176,24 +158,29 @@ fn handle_wrapper(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn handle(
+#[derive(Builder)]
+struct HandleParams {
     uri: String,
-    params: HashMap<String, String>,
+    params: Vec<(String, String)>,
     tx: Sender<VideoFrameEnvelope>,
-    signal: Arc<Mutex<bool>>,
+    init_complete: Sender<()>,
+    exit_signal: Arc<Mutex<bool>>,
     decode: bool,
     autoconvert_raw_formats_to_rgb24: bool,
     block_if_queue_full: bool,
     log_level: Arc<Mutex<Option<Level>>>,
-) -> anyhow::Result<()> {
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle(params: HandleParams) -> anyhow::Result<()> {
     let mut queue_full_skipped_count = 0;
+    let now = Instant::now();
     ffmpeg::init().map_err(|e| {
         error!("Unable to initialize FFmpeg. Error is: {:?}", e);
         e
     })?;
 
-    let ll = log_level.lock().take();
+    let ll = params.log_level.lock().take();
 
     if let Some(l) = ll {
         info!("Setting log level to {:?}", l);
@@ -201,17 +188,16 @@ fn handle(
     }
 
     let mut opts = ffmpeg::Dictionary::new();
-    for kv in &params {
-        opts.set(kv.0.as_str(), kv.1.as_str());
+    for (k, v) in &params.params {
+        opts.set(k, v);
     }
-    let p = Path::new(uri.as_str());
+    let p = Path::new(params.uri.as_str());
 
     let mut ictx = input_with_dictionary(&p, opts).map_err(|e| {
         error!("Unable to open input URI. Error is: {:?}", e);
         e
     })?;
 
-    // .unwrap_or_else(|| panic!("Cannot discover the best suitable video stream to work with."));
     let video_input = match ictx.streams().best(ffmpeg_next::media::Type::Video) {
         Some(s) => s,
         None => {
@@ -253,11 +239,21 @@ fn handle(
         .and_then(|c| c.decoder().audio().ok());
 
     let mut skip_until_first_key_frame = true;
+    params.init_complete.send(()).map_err(|e| {
+        error!("Unable to send init complete signal. Error is: {:?}", e);
+        e
+    })?;
+    info!(
+        "FFmpeg is initialized for URI: {}, elapsed: {:?}",
+        params.uri,
+        now.elapsed()
+    );
+
     for (stream, packet) in ictx.packets() {
-        if *signal.lock() {
+        if *params.exit_signal.lock() {
             break;
         }
-        let ll = log_level.lock().take();
+        let ll = params.log_level.lock().take();
 
         if let Some(l) = ll {
             info!("Setting log level to {:?}", l);
@@ -312,8 +308,8 @@ fn handle(
                 continue;
             }
 
-            let decode = decode
-                || (autoconvert_raw_formats_to_rgb24
+            let decode = params.decode
+                || (params.autoconvert_raw_formats_to_rgb24
                     && video_decoder.codec().map(|c| c.id()) == Some(Id::RAWVIDEO));
 
             let raw_frames = if decode {
@@ -396,12 +392,12 @@ fn handle(
                     payload: raw_frame,
                     frame_received_ts,
                     frame_processed_ts,
-                    queue_len: i64::try_from(tx.len()).unwrap(),
+                    queue_len: i64::try_from(params.tx.len()).unwrap(),
                 };
 
-                if !block_if_queue_full {
-                    if !tx.is_full() {
-                        let res = tx.send(frame_envelope);
+                if !params.block_if_queue_full {
+                    if !params.tx.is_full() {
+                        let res = params.tx.send(frame_envelope);
 
                         if let Err(e) = res {
                             error!("Unable to send data to upstream. Error is: {:?}", e);
@@ -412,7 +408,7 @@ fn handle(
                         queue_full_skipped_count += 1;
                     }
                 } else {
-                    tx.send(frame_envelope).map_err(|e| {
+                    params.tx.send(frame_envelope).map_err(|e| {
                         error!("Unable to send data to upstream. Error is: {:?}", e);
                         e
                     })?;
@@ -444,46 +440,61 @@ impl FFMpegSource {
         decode = false,
         autoconvert_raw_formats_to_rgb24 = false,
         block_if_queue_full = false,
+        init_timeout_ms = 10000,
         ffmpeg_log_level = FFmpegLogLevel::Info)
     )]
     pub fn new(
         uri: String,
-        params: HashMap<String, String>,
+        params: Vec<(String, String)>,
         queue_len: i64,
         decode: bool,
         autoconvert_raw_formats_to_rgb24: bool,
         block_if_queue_full: bool,
+        init_timeout_ms: u64,
         ffmpeg_log_level: FFmpegLogLevel,
-    ) -> Self {
+    ) -> PyResult<Self> {
         assert!(queue_len > 0, "Queue length must be a positive number");
 
         let (tx, video_source) = crossbeam::channel::bounded(
-            usize::try_from(queue_len).expect("Unable to get queue length from the argument"),
+            usize::try_from(queue_len).map_err(|e| PySystemError::new_err(format!("{:?}", e)))?,
         );
+
+        let (init_tx, init_rx) = crossbeam::channel::bounded(1);
+
         let exit_signal = Arc::new(Mutex::new(false));
         let log_level = Arc::new(Mutex::new(Some(assign_log_level(ffmpeg_log_level))));
 
-        let thread_exit_signal = exit_signal.clone();
-        let thread_ll = log_level.clone();
-        let thread = Some(spawn(move || {
-            handle_wrapper(
-                uri,
-                params,
-                tx,
-                thread_exit_signal,
-                decode,
-                autoconvert_raw_formats_to_rgb24,
-                block_if_queue_full,
-                thread_ll,
-            )
-        }));
+        let handle_params = HandleParamsBuilder::default()
+            .uri(uri.clone())
+            .params(params.into_iter().collect())
+            .tx(tx)
+            .init_complete(init_tx)
+            .exit_signal(exit_signal.clone())
+            .decode(decode)
+            .autoconvert_raw_formats_to_rgb24(autoconvert_raw_formats_to_rgb24)
+            .block_if_queue_full(block_if_queue_full)
+            .log_level(log_level.clone())
+            .build()
+            .map_err(|e| {
+                error!("Unable to create handle params. Error is: {:?}", e);
+                PyValueError::new_err(format!("{:?}", e))
+            })?;
 
-        Self {
+        let thread = Some(spawn(move || handle_wrapper(handle_params)));
+
+        init_rx
+            .recv_timeout(std::time::Duration::from_millis(init_timeout_ms))
+            .map_err(|e| {
+                error!("Unable to initialize the worker thread. Error is: {:?}", e);
+                PySystemError::new_err(format!("{:?}", e))
+            })?;
+
+        Ok(Self {
             video_source,
             thread,
             exit_signal,
             log_level,
-        }
+        })
     }
 
     pub fn stop(&self) {

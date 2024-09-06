@@ -3,7 +3,7 @@ from time import sleep
 from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
-    s = FFMpegSource("/home/ivan/file1.mp4", params={},
+    s = FFMpegSource("/home/ivan/file1.mp4", params=[],
                      queue_len=10, decode=False,
                      block_if_queue_full=True,
                      ffmpeg_log_level=FFmpegLogLevel.Debug)

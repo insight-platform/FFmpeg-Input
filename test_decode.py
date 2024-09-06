@@ -1,18 +1,25 @@
-import time
-
-from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 import cv2
 import numpy as np
+import time
+from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
-    s = FFMpegSource("/dev/video0",
-                     params={"video_size": "1920x1080", "c:v": "v4l2m2m", "input_format": "mjpeg"},
-                     queue_len=100,
-                     decode=True,
-                     ffmpeg_log_level=FFmpegLogLevel.Info)
-    # url = "rtsp://localhost:8554/webcam"
-    # s = FFMpegSource(url, params={"rtsp_transport": "tcp"}, queue_len=10, decode=True,
-    #                  ffmpeg_log_level=FFmpegLogLevel.Info)
+    try:
+        # s = FFMpegSource("/dev/video0",
+        #                  params=[("video_size", "1920x1080"), ("c:v", "v4l2m2m"), ("input_format", "mjpeg")],
+        #                  queue_len=100,
+        #                  decode=True,
+        #                  ffmpeg_log_level=FFmpegLogLevel.Info)
+        url = "rtsp://hello.savant.video:8554/stream/city-traffic"
+        s = FFMpegSource(url, params=[("rtsp_transport", "tcp"), ("rw_timeout", "10000000")],
+                         queue_len=10,
+                         decode=True,
+                         init_timeout_ms=10000,
+                         ffmpeg_log_level=FFmpegLogLevel.Info)
+    except Exception as e:
+        print("Error:", e)
+        exit(1)
+
     s.log_level = FFmpegLogLevel.Panic
     while True:
         try:
