@@ -3,14 +3,13 @@ from time import sleep
 from ffmpeg_input import FFMpegSource, FFmpegLogLevel
 
 if __name__ == '__main__':
-    s = FFMpegSource("/home/ivan/file.mp4", params={},
+    s = FFMpegSource("/home/ivan/file1.mp4", params={},
                      queue_len=10, decode=False,
                      block_if_queue_full=True,
                      ffmpeg_log_level=FFmpegLogLevel.Debug)
     s.log_level = FFmpegLogLevel.Trace
     while True:
         try:
-            sleep(1)
             p = s.video_frame()
             print("Codec: {}, Geometry: {}x{}".format(p.codec, p.frame_width, p.frame_height))
             print("System ts, when the frame was received from the source:", p.frame_received_ts)

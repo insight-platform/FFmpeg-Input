@@ -1,3 +1,4 @@
+use anyhow::bail;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -11,9 +12,9 @@ use ffmpeg_next::codec::Id;
 use ffmpeg_next::format::{input_with_dictionary, Pixel};
 use ffmpeg_next::log::Level;
 use ffmpeg_next::software::converter;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use parking_lot::Mutex;
-use pyo3::exceptions::PyBrokenPipeError;
+use pyo3::exceptions::{PyBrokenPipeError, PySystemError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
@@ -83,8 +84,8 @@ pub struct VideoFrameEnvelope {
     pub payload: Vec<u8>,
 }
 
-#[pyclass]
-#[derive(Debug, Clone)]
+#[pyclass(eq, eq_int)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FFmpegLogLevel {
     Debug,
     Info,
@@ -110,18 +111,18 @@ impl VideoFrameEnvelope {
     }
 
     fn payload_as_bytes(&self, py: Python) -> PyResult<PyObject> {
-        let res = PyBytes::new_with(py, self.payload.len(), |b: &mut [u8]| {
+        let bytes = PyBytes::new_bound_with(py, self.payload.len(), |b: &mut [u8]| {
             b.copy_from_slice(&self.payload);
             Ok(())
         })?;
-        Ok(res.into())
+        Ok(PyObject::from(bytes))
     }
 }
 
 #[pyclass]
 pub struct FFMpegSource {
     video_source: Receiver<VideoFrameEnvelope>,
-    thread: Option<JoinHandle<()>>,
+    thread: Option<JoinHandle<anyhow::Result<()>>>,
     exit_signal: Arc<Mutex<bool>>,
     log_level: Arc<Mutex<Option<Level>>>,
 }
@@ -133,8 +134,45 @@ impl Drop for FFMpegSource {
             *exit_signal = true;
         }
         let t = self.thread.take();
-        t.unwrap().join().expect("Thread must be finished normally");
+        let _ = t
+            .unwrap()
+            .join()
+            .expect("Thread must be finished normally")
+            .map_err(|e| {
+                error!("Error in the worker thread. Error is: {:?}", e);
+            });
         debug!("Worker thread is terminated");
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_wrapper(
+    uri: String,
+    params: HashMap<String, String>,
+    tx: Sender<VideoFrameEnvelope>,
+    signal: Arc<Mutex<bool>>,
+    decode: bool,
+    autoconvert_raw_formats_to_rgb24: bool,
+    block_if_queue_full: bool,
+    log_level: Arc<Mutex<Option<Level>>>,
+) -> anyhow::Result<()> {
+    match handle(
+        uri,
+        params,
+        tx,
+        signal.clone(),
+        decode,
+        autoconvert_raw_formats_to_rgb24,
+        block_if_queue_full,
+        log_level,
+    ) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let mut state = signal.lock();
+            *state = true;
+            error!("Error in the worker thread. Error is: {:?}", e);
+            Err(e)
+        }
     }
 }
 
@@ -148,9 +186,13 @@ fn handle(
     autoconvert_raw_formats_to_rgb24: bool,
     block_if_queue_full: bool,
     log_level: Arc<Mutex<Option<Level>>>,
-) {
+) -> anyhow::Result<()> {
     let mut queue_full_skipped_count = 0;
-    ffmpeg::init().expect("FFmpeg initialization must be successful");
+    ffmpeg::init().map_err(|e| {
+        error!("Unable to initialize FFmpeg. Error is: {:?}", e);
+        e
+    })?;
+
     let ll = log_level.lock().take();
 
     if let Some(l) = ll {
@@ -164,37 +206,40 @@ fn handle(
     }
     let p = Path::new(uri.as_str());
 
-    let mut ictx = input_with_dictionary(&p, opts).expect("Input stream must be initialized");
+    let mut ictx = input_with_dictionary(&p, opts).map_err(|e| {
+        error!("Unable to open input URI. Error is: {:?}", e);
+        e
+    })?;
 
-    let video_input = ictx
-        .streams()
-        .best(ffmpeg_next::media::Type::Video)
-        .unwrap_or_else(|| panic!("Cannot discover the best suitable video stream to work with."));
+    // .unwrap_or_else(|| panic!("Cannot discover the best suitable video stream to work with."));
+    let video_input = match ictx.streams().best(ffmpeg_next::media::Type::Video) {
+        Some(s) => s,
+        None => {
+            let msg = "Cannot discover the best suitable video stream to work with.";
+            error!("{}", msg);
+            bail!(msg);
+        }
+    };
 
     let video_stream_index = video_input.index();
 
     let mut video_decoder =
         ffmpeg::codec::context::Context::from_parameters(video_input.parameters())
             .and_then(|c| c.decoder().video())
-            .expect("Video decoder must be available");
+            .map_err(|e| {
+                error!("Unable to get video decoder. Error is: {:?}", e);
+                e
+            })?;
 
     let mut converter = converter(
         (video_decoder.width(), video_decoder.height()),
         video_decoder.format(),
         DECODING_FORMAT,
     )
-    .expect("Video scaler must be initialized");
-
-    // let mut video_scaler = Context::get(
-    //     video_decoder.format(),
-    //     video_decoder.width(),
-    //     video_decoder.height(),
-    //     Pixel::rgb24,
-    //     video_decoder.width(),
-    //     video_decoder.height(),
-    //     Flags::FAST_BILINEAR,
-    // )
-    // .expect("Video scaler must be initialized");
+    .map_err(|e| {
+        error!("Unable to get video converter. Error is: {:?}", e);
+        e
+    })?;
 
     let audio_stream_index_opt = ictx
         .streams()
@@ -225,7 +270,10 @@ fn handle(
                 .unwrap()
                 .as_millis(),
         )
-        .expect("Milliseconds must fit i64");
+        .map_err(|e| {
+            error!("Unable to get current time. Error is: {:?}", e);
+            e
+        })?;
 
         if let Some(index) = audio_stream_index_opt {
             if index == stream.index() {
@@ -245,7 +293,7 @@ fn handle(
             let has_key_frames = match is_stream_key_framed(stream.codec().id()) {
                 Ok(res) => res,
                 Err(e) => {
-                    panic!(
+                    bail!(
                         "Unsupported video codec detected: {:?}, exit the application.",
                         e
                     );
@@ -270,15 +318,17 @@ fn handle(
 
             let raw_frames = if decode {
                 let mut raw_frames = Vec::new();
-                video_decoder
-                    .send_packet(p)
-                    .expect("Packet must be sent to decoder");
+                video_decoder.send_packet(p).map_err(|e| {
+                    error!("Unable to send packet to decoder. Error is: {:?}", e);
+                    e
+                })?;
                 let mut decoded = Video::empty();
                 while video_decoder.receive_frame(&mut decoded).is_ok() {
                     let mut rgb_frame = Video::empty();
-                    converter
-                        .run(&decoded, &mut rgb_frame)
-                        .expect("RGB conversion must succeed");
+                    converter.run(&decoded, &mut rgb_frame).map_err(|e| {
+                        error!("Unable to convert frame to RGB. Error is: {:?}", e);
+                        e
+                    })?;
 
                     raw_frames.push((
                         rgb_frame.data(0).to_vec(),
@@ -325,7 +375,10 @@ fn handle(
                         .unwrap()
                         .as_millis(),
                 )
-                .expect("Milliseconds must fit i64");
+                .map_err(|e| {
+                    error!("Unable to get current time. Error is: {:?}", e);
+                    e
+                })?;
 
                 let frame_envelope = VideoFrameEnvelope {
                     codec,
@@ -359,12 +412,15 @@ fn handle(
                         queue_full_skipped_count += 1;
                     }
                 } else {
-                    tx.send(frame_envelope)
-                        .expect("Unable to send data to upstream");
+                    tx.send(frame_envelope).map_err(|e| {
+                        error!("Unable to send data to upstream. Error is: {:?}", e);
+                        e
+                    })?;
                 }
             }
         }
     }
+    Ok(())
 }
 
 fn assign_log_level(ffmpeg_log_level: FFmpegLogLevel) -> Level {
@@ -410,7 +466,7 @@ impl FFMpegSource {
         let thread_exit_signal = exit_signal.clone();
         let thread_ll = log_level.clone();
         let thread = Some(spawn(move || {
-            handle(
+            handle_wrapper(
                 uri,
                 params,
                 tx,
@@ -430,10 +486,31 @@ impl FFMpegSource {
         }
     }
 
-    pub fn video_frame(&self) -> PyResult<VideoFrameEnvelope> {
+    pub fn stop(&self) {
+        let mut exit_signal = self.exit_signal.lock();
+        *exit_signal = true;
+    }
+
+    #[getter]
+    pub fn is_running(&self) -> bool {
+        !*self.exit_signal.lock()
+    }
+
+    #[pyo3(signature = (timeout_ms = 10000))]
+    pub fn video_frame(&self, timeout_ms: usize) -> PyResult<VideoFrameEnvelope> {
+        if *self.exit_signal.lock() {
+            return Err(PySystemError::new_err("Worker thread is not running"));
+        }
         Python::with_gil(|py| {
             py.allow_threads(|| {
-                let res = self.video_source.recv();
+                let res = self
+                    .video_source
+                    .recv_timeout(std::time::Duration::from_millis(
+                        u64::try_from(timeout_ms).map_err(|e| {
+                            error!("Unable to convert timeout to u64. Error is: {:?}", e);
+                            e
+                        })?,
+                    ));
                 match res {
                     Err(e) => Err(PyBrokenPipeError::new_err(format!("{:?}", e))),
                     Ok(x) => Ok(x),
@@ -450,8 +527,7 @@ impl FFMpegSource {
 }
 
 #[pymodule]
-#[pyo3(name = "ffmpeg_input")]
-fn ffmpeg_input(_py: Python, m: &PyModule) -> PyResult<()> {
+fn ffmpeg_input(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     _ = env_logger::try_init_from_env("LOGLEVEL").map_err(|e| {
         log::warn!("Unable to initialize logger. Error is: {:?}", e);
     });
