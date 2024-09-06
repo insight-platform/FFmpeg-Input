@@ -32,6 +32,8 @@ if __name__ == '__main__':
             end = time.time()
             print(p.codec, p.pixel_format, p.queue_len, "all_time={}".format(int(end * 1000 - p.frame_received_ts)),
                   "python_time={}".format(int(end * 1000 - p.frame_processed_ts)))
+            # convert RGB24 to BGR
+            res = cv2.cvtColor(res, cv2.COLOR_RGB2BGR)
             cv2.imshow('Image', res)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 s.stop()
