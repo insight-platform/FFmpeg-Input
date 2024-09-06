@@ -23,7 +23,7 @@ if __name__ == '__main__':
     s.log_level = FFmpegLogLevel.Panic
     while True:
         try:
-            p = s.video_frame()
+            p = s.video_frame(timeout_ms=1000)
             res = p.payload_as_bytes()
             # 1944 2592
             # print(p.frame_height, p.frame_width)
