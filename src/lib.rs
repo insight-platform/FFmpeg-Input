@@ -335,7 +335,7 @@ fn handle(params: HandleParams) -> anyhow::Result<()> {
                 raw_frames
             } else {
                 vec![(
-                    p.data().unwrap().to_vec(),
+                    p.data().unwrap_or(&[]).to_vec(),
                     video_decoder.width(),
                     video_decoder.height(),
                 )]
@@ -343,7 +343,10 @@ fn handle(params: HandleParams) -> anyhow::Result<()> {
 
             for (raw_frame, width, height) in raw_frames {
                 let codec = if !decode {
-                    String::from(video_decoder.codec().unwrap().name())
+                    match video_decoder.codec() {
+                        Some(c) => String::from(c.name()),
+                        None => bail!("Unable to get codec name"),
+                    }
                 } else {
                     String::from(Id::RAWVIDEO.name())
                 };
@@ -434,6 +437,7 @@ fn assign_log_level(ffmpeg_log_level: FFmpegLogLevel) -> Level {
 
 #[pymethods]
 impl FFMpegSource {
+    #[allow(clippy::too_many_arguments)]
     #[new]
     #[pyo3(signature = (uri, params,
         queue_len = 32,
