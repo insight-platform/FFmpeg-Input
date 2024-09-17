@@ -16,13 +16,13 @@ if __name__ == '__main__':
     # set env LOGLEVEL=info
     # file = "/home/ivan/Downloads/1_underground_supercut_reencode_bug_ab.mp4"
     # file = "/home/ivan/Downloads/1_underground_supercut.mp4"
-    file = "/home/ivan/Downloads/1_underground_supercut_reencode_bug.mp4"
+    file = "/home/ivan/Downloads/1_underground_supercut_reencode_bug_x265.mp4"
     # file = "/home/ivan/Downloads/1_underground_supercut_reencode_bug_aud.mp4"
     s = FFMpegSource(file, params=[],
                      queue_len=10, decode=False,
                      block_if_queue_full=True,
-                     ffmpeg_log_level=FFmpegLogLevel.Trace)
-    s.log_level = FFmpegLogLevel.Trace
+                     ffmpeg_log_level=FFmpegLogLevel.Info)
+    s.log_level = FFmpegLogLevel.Info
     # counter = 0
     while True:
         try:
@@ -40,8 +40,8 @@ if __name__ == '__main__':
             first_hex_res = " ".join(format(x, '02x') for x in payload[:16])
             last_hex_res = " ".join(format(x, '02x') for x in payload[-4:])
             code = decode_exp_golomb(payload[:16])
-            int_val = int(code, 2)
-            print("Payload bin start:", int_val, code)
+            # int_val = int(code, 2)
+            print("Payload bin start:", code)
             print("Payload hex start:", first_hex_res)
             # if len(payload) - 4 > int_val:
             #     first_hex_res = " ".join(format(x, '02x') for x in payload[4 + int_val:20 + int_val])

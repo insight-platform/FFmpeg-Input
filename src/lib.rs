@@ -256,7 +256,7 @@ fn process_bsf(
                 }
 
                 loop {
-                    let mut new_packet = Packet::empty();
+                    let mut new_packet = Packet::new(packet.size() + 2048);
                     let ret = av_bsf_receive_packet(filter.ptr, packet.as_mut_ptr());
                     if ret < 0 {
                         break;
@@ -265,6 +265,11 @@ fn process_bsf(
                         break;
                     }
                     new_packet.set_stream(packet.stream());
+                    new_packet.set_flags(packet.flags());
+                    new_packet.set_dts(packet.dts());
+                    new_packet.set_pts(packet.pts());
+                    new_packet.set_duration(packet.duration());
+                    // new_packet.set_position(packet.position());
                     new_packets.push(new_packet.clone());
                 }
             }
@@ -437,6 +442,7 @@ fn handle(params: HandleParams) -> anyhow::Result<()> {
                 }
 
                 if skip_until_first_key_frame {
+                    debug!("Skipping until the first key frame");
                     continue;
                 }
 
