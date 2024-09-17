@@ -66,7 +66,7 @@ jobs:
         run: docker run --rm -v $(pwd)/distfiles:/tmp ffmpeg_input cp -R /opt/dist /tmp
 
       - name: Upload wheels
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.name }}
           path: distfiles/dist
@@ -77,10 +77,10 @@ jobs:
     if: "startsWith(github.ref, 'refs/tags/')"
     needs: [linux]
     steps:
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v4
         with:
           name: wheels-manylinux-arm
-      - uses: actions/download-artifact@v4.1.7
+      - uses: actions/download-artifact@v4
         with:
           name: wheels-manylinux-x86
       - name: Publish to PyPI
@@ -91,11 +91,11 @@ jobs:
           command: upload
           args: --skip-existing *
       - name: Download native artifacts ARM
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@v4
         with:
           name: wheels-native-arm
       - name: Download native artifacts x86
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@v4
         with:
           name: wheels-native-x86
       - name: Attach Artifacts to the release
