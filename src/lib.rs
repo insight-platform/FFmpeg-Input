@@ -327,18 +327,30 @@ fn handle(params: HandleParams) -> anyhow::Result<()> {
     match video_input.codec().id() {
         Id::H264 => {
             video_filters.push(init_bsf(
-                "h264_metadata",
+                "h264_mp4toannexb",
                 &video_parameters,
                 time_base,
-                &[("aud".into(), "insert".into())],
+                &[],
             )?);
+            // video_filters.push(init_bsf(
+            //     "h264_metadata",
+            //     &video_parameters,
+            //     time_base,
+            //     &[("aud".into(), "insert".into())],
+            // )?);
         }
         Id::HEVC | Id::H265 => {
+            // video_filters.push(init_bsf(
+            //     "hevc_metadata",
+            //     &video_parameters,
+            //     time_base,
+            //     &[("aud".into(), "insert".into())],
+            // )?);
             video_filters.push(init_bsf(
-                "hevc_metadata",
+                "hevc_mp4toannexb",
                 &video_parameters,
                 time_base,
-                &[("aud".into(), "insert".into())],
+                &[],
             )?);
         }
         _ => {}
