@@ -1,17 +1,27 @@
 use anyhow::bail;
+use std::ffi::CString;
+use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::{spawn, JoinHandle};
 use std::time::{Instant, SystemTime};
 
+use bitstream_io::{BigEndian, BitRead, BitReader};
 use crossbeam::channel::{Receiver, Sender};
 use derive_builder::Builder;
 use ffmpeg::util::frame::video::Video;
 use ffmpeg_next as ffmpeg;
-use ffmpeg_next::codec::Id;
+use ffmpeg_next::codec::{Id, Parameters};
+use ffmpeg_next::ffi::{av_bsf_alloc, av_bsf_init, AVBSFContext, AVERROR, AVERROR_EOF};
 use ffmpeg_next::format::{input_with_dictionary, Pixel};
 use ffmpeg_next::log::Level;
+use ffmpeg_next::packet::Mut;
 use ffmpeg_next::software::converter;
+use ffmpeg_next::sys::{
+    av_bsf_get_by_name, av_bsf_receive_packet, av_bsf_send_packet, av_opt_set,
+    avcodec_parameters_copy, AV_OPT_SEARCH_CHILDREN, EAGAIN,
+};
+use ffmpeg_next::{Packet, Rational};
 use log::{debug, error, info};
 use parking_lot::Mutex;
 use pyo3::exceptions::{PyBrokenPipeError, PySystemError, PyValueError};
@@ -171,6 +181,101 @@ struct HandleParams {
     log_level: Arc<Mutex<Option<Level>>>,
 }
 
+struct BitStreamFilterContext {
+    ptr: *mut AVBSFContext,
+}
+
+impl BitStreamFilterContext {
+    pub fn name(&self) -> String {
+        unsafe {
+            let ptr = (*self.ptr).filter.as_ref().unwrap().name;
+            let c_str = std::ffi::CStr::from_ptr(ptr);
+            c_str.to_string_lossy().to_string()
+        }
+    }
+}
+
+fn init_bsf(
+    name: &str,
+    video_parameters: &Parameters,
+    time_base: Rational,
+    opts: &[(String, String)],
+) -> anyhow::Result<BitStreamFilterContext> {
+    unsafe {
+        let c_name = CString::new(name).unwrap();
+        let ptr = av_bsf_get_by_name(c_name.as_ptr());
+
+        if ptr.is_null() {
+            bail!("Unable to find bitstream filter by name: {}", name);
+        }
+
+        let mut av_bsf_ctx = std::ptr::null_mut();
+        if av_bsf_alloc(ptr, &mut av_bsf_ctx) < 0 {
+            bail!("Unable to allocate bitstream filter context");
+        }
+
+        if avcodec_parameters_copy((*av_bsf_ctx).par_in, video_parameters.as_ptr()) < 0 {
+            bail!("Unable to copy codec parameters");
+        }
+
+        (*av_bsf_ctx).time_base_in = time_base.into();
+
+        for (ok, ov) in opts {
+            let opt_k = CString::new(ok.as_str()).unwrap();
+            let opt_v = CString::new(ov.as_str()).unwrap();
+            av_opt_set(
+                av_bsf_ctx as *mut _,
+                opt_k.as_ptr(),
+                opt_v.as_ptr(),
+                AV_OPT_SEARCH_CHILDREN,
+            );
+            // Insert AUD
+        }
+
+        if av_bsf_init(av_bsf_ctx) < 0 {
+            bail!("Unable to initialize bitstream filter context");
+        }
+
+        Ok(BitStreamFilterContext { ptr: av_bsf_ctx })
+    }
+}
+
+fn process_bsf(
+    filters: &mut Vec<BitStreamFilterContext>,
+    packet: &ffmpeg::Packet,
+) -> anyhow::Result<Vec<Packet>> {
+    let mut packets = vec![packet.clone()];
+    for filter in filters {
+        debug!("Filter: {}", filter.name());
+        debug!("Ingress packet count: {}", packets.len());
+        let mut new_packets = Vec::new();
+        for mut packet in packets.drain(..) {
+            unsafe {
+                if av_bsf_send_packet(filter.ptr, packet.as_mut_ptr()) < 0 {
+                    error!("Unable to send packet to bitstream filter");
+                }
+
+                loop {
+                    let mut new_packet = Packet::empty();
+                    let ret = av_bsf_receive_packet(filter.ptr, packet.as_mut_ptr());
+                    if ret < 0 {
+                        break;
+                    }
+                    if ret == AVERROR(EAGAIN) || ret == AVERROR_EOF {
+                        break;
+                    }
+                    new_packet.set_stream(packet.stream());
+                    new_packets.push(new_packet.clone());
+                }
+            }
+        }
+        debug!("Egress packet count: {}", new_packets.len());
+        packets = new_packets;
+    }
+
+    Ok(packets)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle(params: HandleParams) -> anyhow::Result<()> {
     let mut queue_full_skipped_count = 0;
@@ -206,8 +311,34 @@ fn handle(params: HandleParams) -> anyhow::Result<()> {
             bail!(msg);
         }
     };
+    let video_parameters = video_input.parameters();
+    let time_base = video_input.time_base();
+
+    info!("Codec: {:?}", video_input.codec().id());
 
     let video_stream_index = video_input.index();
+
+    let mut video_filters = Vec::new();
+
+    match video_input.codec().id() {
+        Id::H264 => {
+            video_filters.push(init_bsf(
+                "h264_metadata",
+                &video_parameters,
+                time_base,
+                &[("aud".into(), "insert".into())],
+            )?);
+        }
+        Id::HEVC | Id::H265 => {
+            video_filters.push(init_bsf(
+                "hevc_metadata",
+                &video_parameters,
+                time_base,
+                &[("aud".into(), "insert".into())],
+            )?);
+        }
+        _ => {}
+    }
 
     let mut video_decoder =
         ffmpeg::codec::context::Context::from_parameters(video_input.parameters())
@@ -283,138 +414,139 @@ fn handle(params: HandleParams) -> anyhow::Result<()> {
         }
 
         if stream.index() == video_stream_index {
-            let p = &packet;
-            let time_base_r = stream.time_base();
+            let modified_packets = process_bsf(&mut video_filters, &packet)?;
+            for p in &modified_packets {
+                let time_base_r = stream.time_base();
 
-            let has_key_frames = match is_stream_key_framed(stream.codec().id()) {
-                Ok(res) => res,
-                Err(e) => {
-                    bail!(
-                        "Unsupported video codec detected: {:?}, exit the application.",
-                        e
-                    );
-                }
-            };
+                let has_key_frames = match is_stream_key_framed(stream.codec().id()) {
+                    Ok(res) => res,
+                    Err(e) => {
+                        bail!(
+                            "Unsupported video codec detected: {:?}, exit the application.",
+                            e
+                        );
+                    }
+                };
 
-            if has_key_frames {
-                if p.is_key() {
-                    skip_until_first_key_frame = false;
-                }
-            } else {
-                skip_until_first_key_frame = false;
-            }
-
-            if skip_until_first_key_frame {
-                continue;
-            }
-
-            let decode = params.decode
-                || (params.autoconvert_raw_formats_to_rgb24
-                    && video_decoder.codec().map(|c| c.id()) == Some(Id::RAWVIDEO));
-
-            let raw_frames = if decode {
-                let mut raw_frames = Vec::new();
-                video_decoder.send_packet(p).map_err(|e| {
-                    error!("Unable to send packet to decoder. Error is: {:?}", e);
-                    e
-                })?;
-                let mut decoded = Video::empty();
-                while video_decoder.receive_frame(&mut decoded).is_ok() {
-                    let mut rgb_frame = Video::empty();
-                    converter.run(&decoded, &mut rgb_frame).map_err(|e| {
-                        error!("Unable to convert frame to RGB. Error is: {:?}", e);
-                        e
-                    })?;
-
-                    raw_frames.push((
-                        rgb_frame.data(0).to_vec(),
-                        rgb_frame.stride(0) as u32 / DECODED_PIX_BYTES,
-                        rgb_frame.plane_height(0),
-                    ));
-                }
-                raw_frames
-            } else {
-                vec![(
-                    p.data().unwrap_or(&[]).to_vec(),
-                    video_decoder.width(),
-                    video_decoder.height(),
-                )]
-            };
-
-            for (raw_frame, width, height) in raw_frames {
-                let codec = if !decode {
-                    match video_decoder.codec() {
-                        Some(c) => String::from(c.name()),
-                        None => bail!("Unable to get codec name"),
+                if has_key_frames {
+                    if p.is_key() {
+                        skip_until_first_key_frame = false;
                     }
                 } else {
-                    String::from(Id::RAWVIDEO.name())
-                };
+                    skip_until_first_key_frame = false;
+                }
 
-                let pixel_format = if !decode {
-                    format!("{:?}", video_decoder.format())
+                if skip_until_first_key_frame {
+                    continue;
+                }
+
+                let decode = params.decode
+                    || (params.autoconvert_raw_formats_to_rgb24
+                        && video_decoder.codec().map(|c| c.id()) == Some(Id::RAWVIDEO));
+
+                let raw_frames = if decode {
+                    let mut raw_frames = Vec::new();
+                    video_decoder.send_packet(p).map_err(|e| {
+                        error!("Unable to send packet to decoder. Error is: {:?}", e);
+                        e
+                    })?;
+                    let mut decoded = Video::empty();
+                    while video_decoder.receive_frame(&mut decoded).is_ok() {
+                        let mut rgb_frame = Video::empty();
+                        converter.run(&decoded, &mut rgb_frame).map_err(|e| {
+                            error!("Unable to convert frame to RGB. Error is: {:?}", e);
+                            e
+                        })?;
+                        raw_frames.push((
+                            rgb_frame.data(0).to_vec(),
+                            rgb_frame.stride(0) as u32 / DECODED_PIX_BYTES,
+                            rgb_frame.plane_height(0),
+                        ));
+                    }
+                    raw_frames
                 } else {
-                    format!("{:?}", DECODING_FORMAT)
+                    vec![(
+                        p.data().unwrap_or(&[]).to_vec(),
+                        video_decoder.width(),
+                        video_decoder.height(),
+                    )]
                 };
 
-                let key_frame = p.is_key();
-                let pts = p.pts();
-                let dts = p.dts();
-                let corrupted = p.is_corrupt();
-                let fps = stream.rate().to_string();
-                let avg_fps = stream.avg_frame_rate().to_string();
+                for (raw_frame, width, height) in raw_frames {
+                    let codec = if !decode {
+                        match video_decoder.codec() {
+                            Some(c) => String::from(c.name()),
+                            None => bail!("Unable to get codec name"),
+                        }
+                    } else {
+                        String::from(Id::RAWVIDEO.name())
+                    };
 
-                debug!("Frame info: codec_name={:?}, FPS={:?}, AVG_FPS={:?}, width={}, height={}, is_key={}, len={}, pts={:?}, dts={:?}, is_corrupt={}, pixel_format={}",
+                    let pixel_format = if !decode {
+                        format!("{:?}", video_decoder.format())
+                    } else {
+                        format!("{:?}", DECODING_FORMAT)
+                    };
+
+                    let key_frame = p.is_key();
+                    let pts = p.pts();
+                    let dts = p.dts();
+                    let corrupted = p.is_corrupt();
+                    let fps = stream.rate().to_string();
+                    let avg_fps = stream.avg_frame_rate().to_string();
+
+                    debug!("Frame info: codec_name={:?}, FPS={:?}, AVG_FPS={:?}, width={}, height={}, is_key={}, len={}, pts={:?}, dts={:?}, is_corrupt={}, pixel_format={}",
                          codec, fps, avg_fps, width, height, key_frame, raw_frame.len(),
                          pts, dts, corrupted, pixel_format);
 
-                let frame_processed_ts = i64::try_from(
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis(),
-                )
-                .map_err(|e| {
-                    error!("Unable to get current time. Error is: {:?}", e);
-                    e
-                })?;
-
-                let frame_envelope = VideoFrameEnvelope {
-                    codec,
-                    frame_width: i64::from(width),
-                    frame_height: i64::from(height),
-                    key_frame,
-                    pts,
-                    dts,
-                    corrupted,
-                    time_base: (time_base_r.0 as i64, time_base_r.1 as i64),
-                    fps,
-                    avg_fps,
-                    pixel_format,
-                    queue_full_skipped_count,
-                    payload: raw_frame,
-                    frame_received_ts,
-                    frame_processed_ts,
-                    queue_len: i64::try_from(params.tx.len()).unwrap(),
-                };
-
-                if !params.block_if_queue_full {
-                    if !params.tx.is_full() {
-                        let res = params.tx.send(frame_envelope);
-
-                        if let Err(e) = res {
-                            error!("Unable to send data to upstream. Error is: {:?}", e);
-                            break;
-                        }
-                    } else {
-                        dbg!("Sink queue is full, the frame is skipped.");
-                        queue_full_skipped_count += 1;
-                    }
-                } else {
-                    params.tx.send(frame_envelope).map_err(|e| {
-                        error!("Unable to send data to upstream. Error is: {:?}", e);
+                    let frame_processed_ts = i64::try_from(
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis(),
+                    )
+                    .map_err(|e| {
+                        error!("Unable to get current time. Error is: {:?}", e);
                         e
                     })?;
+
+                    let frame_envelope = VideoFrameEnvelope {
+                        codec,
+                        frame_width: i64::from(width),
+                        frame_height: i64::from(height),
+                        key_frame,
+                        pts,
+                        dts,
+                        corrupted,
+                        time_base: (time_base_r.0 as i64, time_base_r.1 as i64),
+                        fps,
+                        avg_fps,
+                        pixel_format,
+                        queue_full_skipped_count,
+                        payload: raw_frame,
+                        frame_received_ts,
+                        frame_processed_ts,
+                        queue_len: i64::try_from(params.tx.len()).unwrap(),
+                    };
+
+                    if !params.block_if_queue_full {
+                        if !params.tx.is_full() {
+                            let res = params.tx.send(frame_envelope);
+
+                            if let Err(e) = res {
+                                error!("Unable to send data to upstream. Error is: {:?}", e);
+                                break;
+                            }
+                        } else {
+                            dbg!("Sink queue is full, the frame is skipped.");
+                            queue_full_skipped_count += 1;
+                        }
+                    } else {
+                        params.tx.send(frame_envelope).map_err(|e| {
+                            error!("Unable to send data to upstream. Error is: {:?}", e);
+                            e
+                        })?;
+                    }
                 }
             }
         }
@@ -541,6 +673,35 @@ impl FFMpegSource {
     }
 }
 
+// Function to decode Exp-Golomb codes from a slice and return a bit-string
+#[pyfunction]
+fn decode_exp_golomb(slice: &[u8]) -> String {
+    let mut reader = BitReader::endian(Cursor::new(slice), BigEndian);
+    let mut bit_string = String::new();
+
+    // Step 1: Count the number of leading zeros
+    let mut leading_zeros = 0;
+    while let Ok(bit) = reader.read_bit() {
+        bit_string.push(if bit { '1' } else { '0' }); // Append bit to bit-string
+        if !bit {
+            leading_zeros += 1;
+        } else {
+            break; // Stop at the first '1'
+        }
+    }
+
+    // Step 2: Read the remainder of the code
+    let mut code_value = 1; // The first '1' already encountered
+    for _ in 0..leading_zeros {
+        if let Ok(bit) = reader.read_bit() {
+            bit_string.push(if bit { '1' } else { '0' }); // Append to bit-string
+            code_value = (code_value << 1) | if bit { 1 } else { 0 };
+        }
+    }
+
+    bit_string
+}
+
 #[pymodule]
 fn ffmpeg_input(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     _ = env_logger::try_init_from_env("LOGLEVEL").map_err(|e| {
@@ -549,5 +710,6 @@ fn ffmpeg_input(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<VideoFrameEnvelope>()?;
     m.add_class::<FFMpegSource>()?;
     m.add_class::<FFmpegLogLevel>()?;
+    m.add_function(wrap_pyfunction!(decode_exp_golomb, m)?)?;
     Ok(())
 }
