@@ -269,7 +269,6 @@ fn process_bsf(
                     new_packet.set_dts(packet.dts());
                     new_packet.set_pts(packet.pts());
                     new_packet.set_duration(packet.duration());
-                    // new_packet.set_position(packet.position());
                     new_packets.push(new_packet.clone());
                 }
             }
