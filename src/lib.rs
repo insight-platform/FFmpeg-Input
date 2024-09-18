@@ -1,12 +1,10 @@
 use anyhow::bail;
 use std::ffi::CString;
-use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread::{spawn, JoinHandle};
 use std::time::{Instant, SystemTime};
 
-use bitstream_io::{BigEndian, BitRead, BitReader};
 use crossbeam::channel::{Receiver, Sender};
 use derive_builder::Builder;
 use ffmpeg::util::frame::video::Video;
@@ -54,6 +52,27 @@ fn is_stream_key_framed(id: Id) -> Result<bool, String> {
     match key_frames {
         Some(v) => Ok(v),
         None => Err(format!("{:?}", id)),
+    }
+}
+
+#[pyclass]
+#[derive(Clone, Debug)]
+pub struct BsfFilter {
+    codec: String,
+    name: String,
+    params: Vec<(String, String)>,
+}
+
+#[pymethods]
+impl BsfFilter {
+    #[new]
+    #[pyo3(signature = (codec, name, params = vec![]))]
+    fn new(codec: String, name: String, params: Vec<(String, String)>) -> Self {
+        Self {
+            codec,
+            name,
+            params,
+        }
     }
 }
 
@@ -179,6 +198,7 @@ struct HandleParams {
     autoconvert_raw_formats_to_rgb24: bool,
     block_if_queue_full: bool,
     log_level: Arc<Mutex<Option<Level>>>,
+    bsf_filters: Vec<BsfFilter>,
 }
 
 struct BitStreamFilterContext {
@@ -324,36 +344,27 @@ fn handle(params: HandleParams) -> anyhow::Result<()> {
 
     let mut video_filters = Vec::new();
 
-    match video_input.codec().id() {
-        Id::H264 => {
-            video_filters.push(init_bsf(
-                "h264_mp4toannexb",
-                &video_parameters,
-                time_base,
-                &[],
-            )?);
-            // video_filters.push(init_bsf(
-            //     "h264_metadata",
-            //     &video_parameters,
-            //     time_base,
-            //     &[("aud".into(), "insert".into())],
-            // )?);
+    let codec_name = video_input.codec().id().name();
+    for f in &params.bsf_filters {
+        if f.codec != codec_name {
+            info!(
+                "Skipping filter {} as it is not applicable to codec {}, must match {}",
+                f.name, codec_name, f.codec
+            );
+            continue;
         }
-        Id::HEVC | Id::H265 => {
-            // video_filters.push(init_bsf(
-            //     "hevc_metadata",
-            //     &video_parameters,
-            //     time_base,
-            //     &[("aud".into(), "insert".into())],
-            // )?);
-            video_filters.push(init_bsf(
-                "hevc_mp4toannexb",
-                &video_parameters,
-                time_base,
-                &[],
-            )?);
-        }
-        _ => {}
+
+        info!(
+            "Initializing filter: {} with parameters {:?}",
+            f.name, f.params
+        );
+
+        video_filters.push(init_bsf(
+            f.name.as_str(),
+            &video_parameters,
+            time_base,
+            &f.params,
+        )?);
     }
 
     let mut video_decoder =
@@ -594,7 +605,8 @@ impl FFMpegSource {
         autoconvert_raw_formats_to_rgb24 = false,
         block_if_queue_full = false,
         init_timeout_ms = 10000,
-        ffmpeg_log_level = FFmpegLogLevel::Info)
+        ffmpeg_log_level = FFmpegLogLevel::Info,
+        bsf_filters = vec![])
     )]
     pub fn new(
         uri: String,
@@ -605,6 +617,7 @@ impl FFMpegSource {
         block_if_queue_full: bool,
         init_timeout_ms: u64,
         ffmpeg_log_level: FFmpegLogLevel,
+        bsf_filters: Vec<BsfFilter>,
     ) -> PyResult<Self> {
         assert!(queue_len > 0, "Queue length must be a positive number");
 
@@ -627,6 +640,7 @@ impl FFMpegSource {
             .autoconvert_raw_formats_to_rgb24(autoconvert_raw_formats_to_rgb24)
             .block_if_queue_full(block_if_queue_full)
             .log_level(log_level.clone())
+            .bsf_filters(bsf_filters.clone())
             .build()
             .map_err(|e| {
                 error!("Unable to create handle params. Error is: {:?}", e);
@@ -690,35 +704,6 @@ impl FFMpegSource {
     }
 }
 
-// Function to decode Exp-Golomb codes from a slice and return a bit-string
-#[pyfunction]
-fn decode_exp_golomb(slice: &[u8]) -> String {
-    let mut reader = BitReader::endian(Cursor::new(slice), BigEndian);
-    let mut bit_string = String::new();
-
-    // Step 1: Count the number of leading zeros
-    let mut leading_zeros = 0;
-    while let Ok(bit) = reader.read_bit() {
-        bit_string.push(if bit { '1' } else { '0' }); // Append bit to bit-string
-        if !bit {
-            leading_zeros += 1;
-        } else {
-            break; // Stop at the first '1'
-        }
-    }
-
-    // Step 2: Read the remainder of the code
-    let mut code_value = 1; // The first '1' already encountered
-    for _ in 0..leading_zeros {
-        if let Ok(bit) = reader.read_bit() {
-            bit_string.push(if bit { '1' } else { '0' }); // Append to bit-string
-            code_value = (code_value << 1) | if bit { 1 } else { 0 };
-        }
-    }
-
-    bit_string
-}
-
 #[pymodule]
 fn ffmpeg_input(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     _ = env_logger::try_init_from_env("LOGLEVEL").map_err(|e| {
@@ -727,6 +712,6 @@ fn ffmpeg_input(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<VideoFrameEnvelope>()?;
     m.add_class::<FFMpegSource>()?;
     m.add_class::<FFmpegLogLevel>()?;
-    m.add_function(wrap_pyfunction!(decode_exp_golomb, m)?)?;
+    m.add_class::<BsfFilter>()?;
     Ok(())
 }
