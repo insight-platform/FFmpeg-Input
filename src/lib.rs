@@ -280,7 +280,7 @@ fn process_bsf(
                     let mut new_packet = Packet::empty();
                     let ret = av_bsf_receive_packet(filter.ptr, new_packet.as_mut_ptr());
                     if ret == AVERROR(EAGAIN) {
-                        //debug!("Required extra packets");
+                        debug!("Required extra packets");
                         break;
                     }
                     if ret == AVERROR_EOF {
@@ -296,10 +296,6 @@ fn process_bsf(
                         new_packet.data().as_ref().unwrap().len()
                     );
                     new_packet.set_stream(packet.stream());
-                    //new_packet.set_flags(packet.flags());
-                    // new_packet.set_dts(packet.dts());
-                    // new_packet.set_pts(packet.pts());
-                    // new_packet.set_duration(packet.duration());
                     new_packets.push(new_packet.clone());
                 }
             }
