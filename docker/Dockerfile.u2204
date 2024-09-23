@@ -1,10 +1,10 @@
-FROM ubuntu:22.04 as base
+FROM ubuntu:22.04 AS base
 
 WORKDIR /opt
 COPY docker/install-basic-deps-u2204.sh .
 RUN bash /opt/install-basic-deps-u2204.sh
 
-FROM base as chef
+FROM base AS chef
 ENV PATH="/root/.cargo/bin:$PATH"
 RUN rustc -V
 
@@ -25,5 +25,5 @@ RUN maturin build --release --manylinux off --out dist
 RUN python3 -m pip install --upgrade pip
 RUN python3 -m pip install dist/*.whl
 
-FROM alpine:3.18 as dist
+FROM alpine:3.18 AS dist
 COPY --from=builder /opt/dist /opt/dist
