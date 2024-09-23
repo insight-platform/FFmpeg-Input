@@ -270,25 +270,36 @@ fn process_bsf(
         debug!("Ingress packet count: {}", packets.len());
         let mut new_packets = Vec::new();
         for mut packet in packets.drain(..) {
+            debug!("Source packet size: {}", packet.size());
             unsafe {
                 if av_bsf_send_packet(filter.ptr, packet.as_mut_ptr()) < 0 {
                     error!("Unable to send packet to bitstream filter");
                 }
 
                 loop {
-                    let mut new_packet = Packet::new(packet.size() + 2048);
-                    let ret = av_bsf_receive_packet(filter.ptr, packet.as_mut_ptr());
+                    let mut new_packet = Packet::empty();
+                    let ret = av_bsf_receive_packet(filter.ptr, new_packet.as_mut_ptr());
+                    if ret == AVERROR(EAGAIN) {
+                        //debug!("Required extra packets");
+                        break;
+                    }
+                    if ret == AVERROR_EOF {
+                        error!("End of filter");
+                        break;
+                    }
                     if ret < 0 {
+                        error!("Unable to receive packet from bitstream filter: {}", ret);
                         break;
                     }
-                    if ret == AVERROR(EAGAIN) || ret == AVERROR_EOF {
-                        break;
-                    }
+                    debug!(
+                        "New packet size: {}",
+                        new_packet.data().as_ref().unwrap().len()
+                    );
                     new_packet.set_stream(packet.stream());
-                    new_packet.set_flags(packet.flags());
-                    new_packet.set_dts(packet.dts());
-                    new_packet.set_pts(packet.pts());
-                    new_packet.set_duration(packet.duration());
+                    //new_packet.set_flags(packet.flags());
+                    // new_packet.set_dts(packet.dts());
+                    // new_packet.set_pts(packet.pts());
+                    // new_packet.set_duration(packet.duration());
                     new_packets.push(new_packet.clone());
                 }
             }

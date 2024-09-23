@@ -12,8 +12,8 @@ def bytes_to_bits_binary(byte_data):
 
 if __name__ == '__main__':
     # set env LOGLEVEL=info
-    file = "/home/ivan/Downloads/1_underground_supercut_reencode_bug.mp4"
-    # file = "/home/ivan/Downloads/1_underground_supercut.mp4"
+    # file = "/dev/video0"
+    file = "/home/ivan/Downloads/1_underground_supercut.mp4"
     # file = "/home/ivan/Downloads/1_underground_supercut_reencode_bug_x265.mp4"
     # file = "/home/ivan/Downloads/1_underground_supercut_reencode_bug_aud.mp4"
     s = FFMpegSource(file, params=[],
@@ -25,6 +25,7 @@ if __name__ == '__main__':
                                   BsfFilter("h265", "hevc_mp4toannexb")])
     s.log_level = FFmpegLogLevel.Info
     # counter = 0
+    f = open("output.h264", "wb")
     while True:
         try:
             p = s.video_frame()
@@ -35,6 +36,7 @@ if __name__ == '__main__':
             print("Skipped frames because of queue overflow:", p.queue_full_skipped_count)
             # print("Is bytestream", p.is_byte_stream)
             payload = p.payload_as_bytes()
+            f.write(payload)
             print("Payload length:", len(payload))
             # print 1st 3 bytes of the payload
             # bin_res = " ".join(format(x, '#010b')[2:] for x in payload[:16])
